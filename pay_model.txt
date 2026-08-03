@@ -1,0 +1,216 @@
+Great question — and it's the **hardest** part of running a marketplace in a cash-heavy economy. Here's an honest, practical breakdown.
+
+---
+
+## The core problem
+
+Once a client and provider connect on your app, they can just:
+1. Exchange phone numbers via chat
+2. Complete the job offline
+3. Pay in cash
+4. Skip your commission entirely
+
+This is called **disintermediation** (or "leakage") and every marketplace fights it. Airbnb, Uber, Upwork all had to solve it. Your job is to make the app-mediated path **cheaper, safer, and more convenient** than going around it.
+
+---
+
+## Enforcement models — ranked from soft to hard
+
+### 🟢 Soft enforcement (easy, honor-system)
+
+**How it works:** Provider marks booking "completed" → app calculates commission → provider owes you a monthly bill → you send an invoice.
+
+**Pros:** Zero payment integration. Ship this week.
+**Cons:** Providers will underreport. Expect **50–70% leakage**.
+
+**When it works:** Only after providers *trust* you enough that they don't want to lose the platform.
+
+---
+
+### 🟡 Medium enforcement (in-app payments, providers pay you)
+
+**How it works:**
+1. Client & provider agree on price in the app.
+2. When booking is marked `completed`, provider is charged commission (10–15%) via saved payment method.
+3. If they don't pay within 7 days → account auto-deactivated.
+
+**Pros:** Automated, transparent.
+**Cons:** Providers still take cash from clients, so they must **actively pay you afterward**. Some will let their account die rather than pay.
+**Leakage:** ~20–40%.
+
+---
+
+### 🟠 Strong enforcement (client pays through app, escrow-style)
+
+**How it works:**
+1. Client pays the **full amount** (say 3000 DZD) into your platform via CIB/BaridiMob/Chargily when booking is confirmed.
+2. Money is held in escrow.
+3. After job completion, provider gets 2700 DZD released (you keep 300 DZD = 10%).
+4. Cash discouraged — provider is told "you'll be paid within 24h of client confirming."
+
+**Pros:** You physically hold the money → commission is impossible to skip. Also builds *client* trust (they can dispute).
+**Cons:** Requires a real DZ payment gateway. Slower onboarding. Some clients don't have online payment.
+**Leakage:** <10%.
+
+**This is the Uber/Airbnb model** and it's the only one that scales.
+
+---
+
+### 🔴 Hardest enforcement (mandatory in-app payment before contact info reveal)
+
+Same as above, but you **hide the provider's phone number until the client has paid**. All communication happens through in-app chat + optional in-app calling.
+
+**Leakage:** <5%. But UX friction is high for a market that expects direct phone contact.
+
+---
+
+## My recommended combo for Algeria
+
+Given the cash reality + low card penetration, I'd stack these:
+
+### Phase 1 (month 1–3): **Soft + tracking** (validate the model)
+- Every completed booking accrues commission in a `provider_debt` field
+- Providers see running balance in profile
+- Show them the value first (leads, verified badge, reviews) before charging anything
+
+### Phase 2 (month 3–9): **Medium + auto-deactivation**
+- Provider owes commission for completed bookings
+- Payment options: CIB card via Chargily, BaridiMob (Algérie Poste), or manual bank transfer with proof upload
+- 7-day grace period → then auto-deactivate account (same infra as your subscription flow)
+- Reactivation = pay outstanding balance
+
+### Phase 3 (month 9+): **Strong for high-value bookings only**
+- Bookings > 5000 DZD → client pays in app (escrow)
+- Smaller bookings → provider pays commission after
+- Gradually shift more bookings into escrow as trust grows
+
+---
+
+## Anti-leakage tactics (all models)
+
+These reduce leakage regardless of payment model:
+
+1. **Hide phone numbers behind first booking**
+   - Provider sees client phone only after client hits "Confirm booking"
+   - Client sees provider phone only after provider hits "Accept"
+   - Log the reveal; if provider is confirmed but no completion happens repeatedly, flag them
+
+2. **Detect chat leakage patterns**
+   - Scan chat messages server-side for phone numbers, WhatsApp/Telegram/Viber names, "let's do it outside", "cash direct"
+   - Warn once, then throttle
+   - The threat matters more than actual enforcement
+
+3. **Rate providers on completion rate, not just star reviews**
+   - Provider who has 20 confirmed bookings but 0 completed = obvious cheater
+   - Auto-lower their search ranking
+
+4. **Bonus for using in-app payment**
+   - Verified providers who use in-app payments 10× in a month → featured badge, priority placement, lower commission
+   - Positive incentives beat threats
+
+5. **Client-side dispute button**
+   - "I paid the provider but he asked me to cancel the booking" → refund + provider penalty
+   - Gives clients a channel that hurts cheaters
+
+6. **Random completion audits**
+   - Send SMS 24h after "completed" booking: "Reply YES if [Provider Name] actually did the job."
+   - Cheap way to catch fake completions
+
+---
+
+## Concrete technical plan for your app
+
+Here's what I'd build, in dependency order:
+
+### Step 1 — Commission tracking (backend)
+
+Add fields to bookings + a new collection:
+
+```python
+# On booking creation:
+"platform_commission_pct": 10,             # locked in at booking time
+"platform_commission_dzd": 300,            # 10% of 3000
+"payment_flow": "provider_owes",           # or "escrow" later
+"commission_paid": False,
+"commission_paid_at": None,
+```
+
+New collection `provider_debts`:
+```python
+{
+  "provider_id": "...",
+  "total_owed_dzd": 2400,
+  "bookings": [<booking_ids>],
+  "last_paid_at": None,
+  "grace_ends_at": "2026-07-15T...",
+}
+```
+
+### Step 2 — Enforcement hook
+
+On `PATCH /api/bookings/{id}/status` when status → `completed`:
+- Compute commission, add to `provider_debts.total_owed_dzd`
+- Reuse your existing `enforce_lifecycle` pattern — if `total_owed_dzd > threshold AND grace_ends_at < now` → mark provider `is_manually_deactivated=true`
+- Provider must pay to reactivate
+
+### Step 3 — Payment integration (Chargily is the fastest DZ on-ramp)
+
+**Chargily Pay** (https://chargily.com) supports CIB + Edahabia + BaridiMob. Free to integrate, ~2.5% transaction fee. Similar to Stripe.
+
+Two new endpoints:
+- `POST /api/commission/pay` → creates Chargily invoice, returns checkout URL
+- `POST /api/webhooks/chargily` → receives payment confirmation, clears debt
+
+### Step 4 — Anti-leakage layer (chat scanner)
+
+Simple regex on outgoing chat messages:
+
+```python
+LEAKAGE_PATTERNS = [
+    r"\+?213\d{9}",           # DZ phone
+    r"0[567]\d{8}",           # DZ mobile
+    r"whats?app|viber|telegram|imo",
+    r"(en dehors|cash direct|hors app|بغير التطبيق)",
+]
+```
+
+On match → replace message with `[hidden — please use in-app booking]` and log incident.
+
+### Step 5 — Escrow (later)
+
+Only when you have >100 monthly bookings and Chargily is working smoothly. Requires:
+- Payout account for each provider (bank account or Edahabia number)
+- Manual or automated payout job (weekly)
+- Regulatory: talk to a DZ lawyer, escrow accounts have licensing implications
+
+---
+
+## What I'd ship first (highest ROI, lowest risk)
+
+**Minimum viable commission enforcement — buildable in ~1 day:**
+
+1. Track commission per completed booking (`platform_commission_dzd`, `commission_paid`)
+2. Show provider their outstanding balance in profile
+3. Add "Pay outstanding commission" button (MOCK for now, real gateway later)
+4. Auto-deactivate providers who owe > 5000 DZD for > 14 days (reuse existing lifecycle)
+5. Basic chat scanner blocking phone numbers + "whatsapp" mentions
+
+Then move to Chargily integration once you validate the model works with providers.
+
+---
+
+## Realistic expectations for Algeria
+
+- **Year 1:** 30–50% leakage. This is normal and unavoidable. Focus on providing value, not policing.
+- **Year 2 with escrow:** 10–20% leakage.
+- **Never zero:** even Uber has leakage. Aim for "cheaper to comply than to cheat."
+
+---
+
+Want me to implement **Step 1 + 2 + 4** now? Roughly:
+- Add commission tracking to the booking model
+- Wire it into the existing `enforce_lifecycle` so unpaid commission auto-deactivates the same way unpaid subscription does
+- Add a provider dashboard card showing outstanding balance
+- Keep payment MOCKED until you're ready for Chargily
+
+That would give you a functional commission model **today** — Chargily integration can slot in later when you have accounts + Business ID from them.

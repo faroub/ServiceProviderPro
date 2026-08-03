@@ -1,0 +1,57 @@
+## 4 new features — phone privacy, 2-step completion, auto-flag, Chargily — all live & tested
+
+- **Phone privacy** — `GET /api/users/{id}/phone` returns the counterpart's phone only when a booking between the two is `confirmed`/`awaiting_confirmation`/`completed`. Every reveal is logged in the new `phone_reveals` collection.
+- **Two-step completion** — provider taps *"I've finished the work"* → booking enters `awaiting_confirmation`. Client taps *"Confirm & review"* → status becomes `completed` AND the review screen auto-opens.
+- **Auto-flagging** — provider is auto-flagged when 3+ confirmed bookings stall 14+ days OR completion rate drops below 60%. On flag: `is_flagged=true`, `search_penalty=100`, account auto-deactivated, and a row appears in the new admin `/admin/flags` queue. Admin can clear via `POST /admin/flags/{id}/clear`.
+- **Chargily Pay** — `POST /api/subscription/pay` returns a Chargily hosted `checkout_url` when `CHARGILY_SECRET_KEY` env is set; otherwise the existing MOCK success path is preserved. `POST /api/webhooks/chargily` is HMAC-verified, idempotent, activates subscription only on `checkout.paid` with correct amount/currency.
+
+Testing: iteration 11 via `testing_agent` — 18/18 backend pytest + frontend smoke PASS. No regressions.
+
+### Chargily setup (when you go live)
+1. Sign up at https://pay.chargily.com → create an application.
+2. Copy the Test Secret Key from Developers Corner.
+3. Add to `/app/backend/.env`: `CHARGILY_SECRET_KEY`, `CHARGILY_WEBHOOK_SECRET`, `CHARGILY_MODE=test`, `API_PUBLIC_URL`, `APP_RETURN_URL=khedmapro://payment-return`.
+4. Register the webhook URL `https://<your-public-backend>/api/webhooks/chargily` in Chargily dashboard (use ngrok for local).
+5. Restart backend. Real checkouts start firing; mock fallback stays as safety net when key is empty.
+6. When verified: switch `CHARGILY_MODE=live`, add Live Key, set `ALLOW_MOCK_PAYMENTS=false`.
+
+### Next Action Items
+- Add an Admin Flags screen (backend endpoints ready; needs a UI similar to the existing verification queue).
+- Wire the phone-reveal endpoint into provider detail + chat with a "Reveal phone" button (backend done; UI hook is small).
+- Push Notifications remains queued.
+
+### Environment note
+- You are currently working in a dev (or preview) environment.
+- Once you make decent progress, you can deploy your app in production and generate iOS and Android builds: Click on publish (visible on right-top of the screen) → Deploy your app → Generate iOS and Android builds.
+- The app preview in the browser takes 20-30 seconds to refresh.
+- To view the app on mobile, scan the QR code beside the preview panel — this redirects you to the Expo Go app where you can test your app.
+- However, some native features like notifications, audio, camera can only be tested on real devices after you deploy and generate a build.
+Action: finish
+Observation: ## 4 new features — phone privacy, 2-step completion, auto-flag, Chargily — all live & tested
+
+- **Phone privacy** — `GET /api/users/{id}/phone` returns the counterpart's phone only when a booking between the two is `confirmed`/`awaiting_confirmation`/`completed`. Every reveal is logged in the new `phone_reveals` collection.
+- **Two-step completion** — provider taps *"I've finished the work"* → booking enters `awaiting_confirmation`. Client taps *"Confirm & review"* → status becomes `completed` AND the review screen auto-opens.
+- **Auto-flagging** — provider is auto-flagged when 3+ confirmed bookings stall 14+ days OR completion rate drops below 60%. On flag: `is_flagged=true`, `search_penalty=100`, account auto-deactivated, and a row appears in the new admin `/admin/flags` queue. Admin can clear via `POST /admin/flags/{id}/clear`.
+- **Chargily Pay** — `POST /api/subscription/pay` returns a Chargily hosted `checkout_url` when `CHARGILY_SECRET_KEY` env is set; otherwise the existing MOCK success path is preserved. `POST /api/webhooks/chargily` is HMAC-verified, idempotent, activates subscription only on `checkout.paid` with correct amount/currency.
+
+Testing: iteration 11 via `testing_agent` — 18/18 backend pytest + frontend smoke PASS. No regressions.
+
+### Chargily setup (when you go live)
+1. Sign up at https://pay.chargily.com → create an application.
+2. Copy the Test Secret Key from Developers Corner.
+3. Add to `/app/backend/.env`: `CHARGILY_SECRET_KEY`, `CHARGILY_WEBHOOK_SECRET`, `CHARGILY_MODE=test`, `API_PUBLIC_URL`, `APP_RETURN_URL=khedmapro://payment-return`.
+4. Register the webhook URL `https://<your-public-backend>/api/webhooks/chargily` in Chargily dashboard (use ngrok for local).
+5. Restart backend. Real checkouts start firing; mock fallback stays as safety net when key is empty.
+6. When verified: switch `CHARGILY_MODE=live`, add Live Key, set `ALLOW_MOCK_PAYMENTS=false`.
+
+### Next Action Items
+- Add an Admin Flags screen (backend endpoints ready; needs a UI similar to the existing verification queue).
+- Wire the phone-reveal endpoint into provider detail + chat with a "Reveal phone" button (backend done; UI hook is small).
+- Push Notifications remains queued.
+
+### Environment note
+- You are currently working in a dev (or preview) environment.
+- Once you make decent progress, you can deploy your app in production and generate iOS and Android builds: Click on publish (visible on right-top of the screen) → Deploy your app → Generate iOS and Android builds.
+- The app preview in the browser takes 20-30 seconds to refresh.
+- To view the app on mobile, scan the QR code beside the preview panel — this redirects you to the Expo Go app where you can test your app.
+- However, some native features like notifications, audio, camera can only be tested on real devices after you deploy and generate a build.

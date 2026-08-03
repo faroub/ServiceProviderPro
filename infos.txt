@@ -1,0 +1,233 @@
+# Run khedmaPro locally in VS Code — start-to-finish guide
+
+> Works on **macOS / Windows / Linux**. Follow top-to-bottom the first time.
+
+---
+
+## 0. Prerequisites
+
+Install these once:
+
+| Tool | Version | Notes |
+|---|---|---|
+| **Node.js** | 20.x LTS | https://nodejs.org (needed by Expo Metro) |
+| **Yarn Classic** | 1.22.x | `npm i -g yarn` (project pins `yarn@1.22.22`) |
+| **Python** | 3.11+ | https://python.org — check `python3 --version` |
+| **MongoDB Community** | 7.x | https://www.mongodb.com/try/download/community (or use Docker: `docker run -d -p 27017:27017 --name mongo mongo:7`) |
+| **Git** | any | to clone the repo |
+| **VS Code** | latest | https://code.visualstudio.com |
+
+**Optional but recommended:**
+- **Expo Go** app on your phone (App Store / Play Store) for on-device testing
+- **iOS Simulator** (macOS + Xcode) or **Android Studio Emulator**
+- **Watchman** (macOS): `brew install watchman` — fixes Metro file-watching on some machines
+
+---
+
+## 1. Pull the code onto your machine
+
+Use the **Push to GitHub** button in Emergent (top-right) to sync the repo, then locally:
+
+```bash
+git clone <your-github-url> khedmaPro
+cd khedmaPro
+code .    # opens VS Code
+```
+
+---
+
+## 2. VS Code extensions (install once)
+
+Open the Extensions panel and install:
+
+- **Python** (Microsoft) — Python + debugger
+- **Pylance** (Microsoft) — types + intellisense
+- **ESLint** (Microsoft) — JS linting
+- **Prettier** (Microsoft) — formatting
+- **Expo Tools** (expo.vscode-expo-tools)
+- **React Native Tools** (Microsoft) — optional, for RN debugging
+- **MongoDB for VS Code** — optional, DB inspector
+
+---
+
+## 3. Set up the backend (FastAPI)
+
+**a.** Open a VS Code terminal (`Ctrl+`` ` / `Cmd+`` `) and run:
+
+```bash
+cd backend
+python3 -m venv .venv
+# macOS / Linux
+source .venv/bin/activate
+# Windows PowerShell
+# .\.venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+```
+
+**b.** Create `backend/.env` (already present in the repo but confirm the values):
+
+```env
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=khedmapro_dev
+JWT_SECRET=change-this-to-a-random-string
+JWT_EXPIRE_MINUTES=1440
+```
+
+**c.** Start MongoDB (if not already running):
+
+```bash
+# macOS (Homebrew)
+brew services start mongodb-community
+
+# Ubuntu / Linux
+sudo systemctl start mongod
+
+# Docker (cross-platform)
+docker run -d -p 27017:27017 --name mongo mongo:7
+```
+
+**d.** Start the backend:
+
+```bash
+# still in /backend, venv activated
+uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+```
+
+Then open http://localhost:8001/api/ — you should see `{"message":"khedmaPro API","status":"ok"}`.
+
+**e.** Seed the demo data (one-time, in another terminal):
+
+```bash
+curl -X POST http://localhost:8001/api/seed
+```
+
+Now you'll have 13 providers + reviews + an `admin@khedmapro.dz / admin123` account.
+
+---
+
+## 4. Set up the frontend (Expo)
+
+**a.** In a **new** VS Code terminal:
+
+```bash
+cd frontend
+yarn install
+```
+
+**b.** Create/verify `frontend/.env`:
+
+```env
+EXPO_PUBLIC_BACKEND_URL=http://localhost:8001
+# The two below are only used by the Emergent preview — safe to leave as-is:
+EXPO_PACKAGER_HOSTNAME=localhost
+EXPO_PACKAGER_PROXY_URL=
+```
+
+> **⚠️ Testing on a physical phone?** Replace `http://localhost:8001` with `http://<YOUR-COMPUTER-LAN-IP>:8001` (e.g. `http://192.168.1.42:8001`). Find your IP with `ipconfig` (Windows) or `ifconfig`/`ipconfig getifaddr en0` (macOS/Linux). Both devices must be on the same Wi-Fi.
+
+**c.** Start Metro / Expo:
+
+```bash
+yarn expo start
+```
+
+Metro prints a QR code + a menu:
+
+| Key | What it does |
+|---|---|
+| `w` | Open in **web** browser (fastest) |
+| `i` | Open **iOS Simulator** (macOS only, requires Xcode) |
+| `a` | Open **Android Emulator** (requires Android Studio AVD running) |
+| Scan QR | Open in **Expo Go** app on your phone |
+
+---
+
+## 5. Login with the seeded accounts
+
+- **Admin (verification review):** `admin@khedmapro.dz` / `admin123`
+- **Provider (plumbing, Algiers):** `provider1@khedmapro.dz` / `password123`
+- All providers 1–13 use `password123`
+
+Full list is in `/memory/test_credentials.md`.
+
+---
+
+## 6. VS Code debug configuration (optional but nice)
+
+Create `.vscode/launch.json`:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI · backend",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["server:app", "--host", "0.0.0.0", "--port", "8001", "--reload"],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Expo · frontend (Metro)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["expo", "start"],
+      "cwd": "${workspaceFolder}/frontend",
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    { "name": "Backend + Frontend", "configurations": ["FastAPI · backend", "Expo · frontend (Metro)"] }
+  ]
+}
+```
+
+Now `F5` → **Backend + Frontend** boots both.
+
+---
+
+## 7. Running the pytest suite
+
+```bash
+cd backend
+source .venv/bin/activate
+export EXPO_PUBLIC_BACKEND_URL=http://localhost:8001
+python -m pytest tests/
+```
+
+---
+
+## 8. Common problems & fixes
+
+| Symptom | Fix |
+|---|---|
+| Frontend can't reach backend on device | Use LAN IP in `EXPO_PUBLIC_BACKEND_URL`, not `localhost` |
+| `MONGO_URL` errors | MongoDB not running — `brew services start mongodb-community` / `docker start mongo` |
+| `Cannot find module 'expo-router/entry'` | Delete `frontend/node_modules` and run `yarn install` again |
+| Metro shows blank / stuck | Press `r` in the Metro terminal to reload, or `shift+m` → "Reload web" |
+| Port 8001 in use | `lsof -i :8001` then `kill <pid>` (macOS/Linux) or `netstat -ano \| findstr :8001` (Windows) |
+| Icons missing | Restart Metro after adding `expo-font` — icon fonts are loaded at startup |
+| iOS Simulator not opening | Install Xcode + run `xcode-select --install`; then `sudo xcodebuild -license accept` |
+| Android Emulator not detected | Start it manually in Android Studio → AVD Manager first, then press `a` in Metro |
+| SQLite offline bookings error on web | Expected — the `.web.ts` fallback uses AsyncStorage; only native uses SQLite |
+
+---
+
+## 9. Native features that will NOT work locally in Expo Go
+
+These require a build (from Emergent's **Publish** → **Deploy** → **Generate builds**):
+
+- Push notifications (once we add them)
+- Background audio / picture-in-picture
+- Any native module marked "requires dev client"
+
+Everything else — auth, chat WebSockets, maps (Leaflet WebView), portfolios, bookings, verification — works fully in Expo Go and web preview.
+
+---
+
+If anything breaks that's not covered above, share the Metro / uvicorn console output and I'll help debug.
