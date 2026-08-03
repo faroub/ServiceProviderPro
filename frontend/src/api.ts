@@ -50,11 +50,16 @@ export const api = {
   },
 
   categories: () => request("/categories", { auth: false }),
-  providers: (params?: { category?: string; search?: string; wilaya?: string }) => {
+  providers: (params?: { category?: string; search?: string; wilaya?: string; lat?: number; lng?: number; radius_km?: number }) => {
     const q = new URLSearchParams();
     if (params?.category) q.set("category", params.category);
     if (params?.search) q.set("search", params.search);
     if (params?.wilaya) q.set("wilaya", params.wilaya);
+    if (params?.lat != null && params?.lng != null && params?.radius_km != null) {
+      q.set("lat", String(params.lat));
+      q.set("lng", String(params.lng));
+      q.set("radius_km", String(params.radius_km));
+    }
     const qs = q.toString();
     return request(`/providers${qs ? `?${qs}` : ""}`, { auth: false });
   },
@@ -92,6 +97,17 @@ export const api = {
   adminReject: (id: string, reason: string) =>
     request(`/admin/verification/${encodeURIComponent(id)}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
 
+  // Phone reveal (behind bookings)
+  revealPhone: (otherId: string) =>
+    request<{ phone: string | null; full_name: string }>(
+      `/users/${encodeURIComponent(otherId)}/phone`
+    ),
+
+  // Admin flag queue
+  adminListFlags: () => request<any[]>("/admin/flags"),
+  adminClearFlag: (providerId: string) =>
+    request(`/admin/flags/${encodeURIComponent(providerId)}/clear`, { method: "POST" }),
+
   // OTP auth
   otpRequest: (phone: string) =>
     request("/auth/otp/request", { method: "POST", body: JSON.stringify({ phone }), auth: false }),
@@ -104,6 +120,12 @@ export const api = {
     if (data.access_token) await saveToken(data.access_token);
     return data;
   },
+  /** Verify the phone of the CURRENTLY authenticated user (best-effort phone verification). */
+  verifyMyPhone: (code: string) =>
+    request<{ phone_verified: boolean; user: any }>("/auth/verify-my-phone", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
   completeProfile: (payload: any) =>
     request("/users/me/profile", { method: "PATCH", body: JSON.stringify(payload) }),
 

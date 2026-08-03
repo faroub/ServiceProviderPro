@@ -266,3 +266,158 @@
 ## Iteration 10 — Backend regression after server.py modular refactor (Jan 2026)
 
 The 1658-line `server.py` was split into `config/database/schemas/reference_data/security/subscription/deps/phone/ws_manager` modules plus a `routes/` package (auth, otp, users, providers, bookings, reviews, subscription, verification, schedule, messages, reports, metadata, seed). Regression was run against the pre-existing pytest suite at `/app/backend/tests/`: **80/81 tests pass under the default `-n 2 --dist loadscope` xdist config**. The only two red items — `tests/test_category_split.py::test_mongo_no_admin_education_rows` (asyncio "no current event loop" on worker) and the session-scope `_cleanup_db` teardown from `tests/test_portfolio_verification.py` (same asyncio pattern, surfaces on the last case of `test_schedule_chat.py`) — are the reviewer-acknowledged pre-existing flakes; both **PASS in isolation** with `--override-ini="addopts=-n 0"`. All 8 targeted smoke checks in the newly added `/app/backend/tests/test_refactor_smoke.py` pass: `GET /api/` → `{message:"khedmaPro API",status:"ok"}`; `/api/categories` returns 11 entries with `admin_consulting` + `education` and no `admin_education`; `/api/wilayas` returns 58; admin login yields `user.is_admin=true`; provider1 login yields `subscription_status="trial"` with `days_until_due>0`; `/api/providers` returns providers whose `portfolio_images` is an object-shaped list (list of dicts) with `email`/`phone` correctly excluded; `/api/ws/chat?token=<invalid>` closes with code 1008 and `?token=<valid>` is accepted. No API contract, response shape, or business-logic regression detected — the refactor is safe. Frontend was intentionally not tested per the review request. JUnit reports: `/app/test_reports/pytest/pytest_iter10.xml`, `/app/test_reports/pytest/pytest_iter10_smoke.xml`, `/app/test_reports/pytest/pytest_iter10_full.xml`.
+
+## Iteration 11 — 2026-01 — new features (phone-gate, 2-step completion, auto-flag, Chargily)
+Backend: 18/18 pytest PASS in tests/test_iter11_new_features.py.
+  * Phone reveal gated by booking status; 400 own-id; 403 no-booking; 200 after confirm; phone_reveals row persisted.
+  * PATCH bookings/{id}/status two-step: provider pending→completed 400; provider confirmed→completed transitions to awaiting_confirmation with provider_marked_done_at; client awaiting_confirmation→completed with client_confirmed_done_at; client cannot set confirmed (403); client cannot complete before provider done (400).
+  * Auto-flag: 3+ stale confirmed bookings trigger is_flagged=true, search_penalty=100, is_manually_deactivated=true, flags row; admin GET /admin/flags lists provider; admin POST /admin/flags/{id}/clear resolves and reactivates; non-admin 401/403.
+  * Chargily webhook: missing signature 400 (in-suite); bogus signature 403 (verified out-of-band with CHARGILY_WEBHOOK_SECRET=test_dummy_key); valid HMAC → 400 "Invalid event" on empty payload. Env restored.
+  * /subscription/pay mock unchanged: {provider:"mock", success:true, amount_dzd:1000, user}.
+Frontend smoke (390x844): provider1 login → Profile → pay-btn tap flipped subscription from "Free trial · 89 days" to "Active subscription · Renews in 29 days" (mock success); bookings-tab-all testID + empty state present. No red screen, no console errors.
+Cleanup verified: 0 leftover TEST bookings/clients/flags/reveals/mock payments; provider1 fully reset.
+No defects. See /app/test_reports/iteration_11.json for details.
+
+---
+## Iteration 12 — Radius-based provider search (Aug 2026)
+
+### Backend (14/14 passed sequentially)
+- `GET /api/providers` (no coords) → all providers, no `distance_km`. ✅
+- Radius mode Algiers 15 km → distances 0–15 km, haversine verified server-side, sorted ascending. ✅
+- Radius + `category=plumbing` combo works. ✅
+- Radius mode Oran 15 km → returns Nassim Bouzid, Leila Bensalem, Karim Belkacem. ✅
+- Radius 1 km → all returned providers within 1 km (jitter admits a few). ✅
+- Validation → 422 on `lat=200`, `radius_km=-5`, `radius_km=600`. ✅
+- Partial params (only lat/lng or only radius) → radius mode NOT activated. ✅
+- `PATCH /api/users/me/profile` persists `location_lat`/`location_lng`; `GET /api/auth/me` reflects; restored to backfilled values. ✅
+- Regression: `?category=cleaning` and `?wilaya=16` still work, no `distance_km` leak. ✅
+- Startup backfill: provider1 coords near (36.7538, 3.0588) with ±0.02 jitter. ✅
+
+### Frontend smoke (390x844, geolocation @ Algiers)
+- All 7 scope chips render with test IDs `scope-2/5/10/25/50/wilaya/country`.
+- `scope-25` displays distance chips ("km away").
+- `scope-country` shows 23 providers, no distance chips.
+- `scope-wilaya` reveals `home-wilaya-picker`.
+- Denied-location: app falls back gracefully to All Algeria (23 providers), no crash. `location-denied-hint` did not render but behavior is within spec.
+
+### Notes
+- One flaky race: `TestProfileLocationUpdate` + `TestBackfill` under pytest-xdist can conflict (both touch provider1). Run with `-o addopts=''` — see `/app/test_reports/iteration_12.json`.
+- Non-blocking console warning: `props.pointerEvents is deprecated` — migrate to `style.pointerEvents`.
+
+Report: `/app/test_reports/iteration_12.json`
+JUnit: `/app/test_reports/pytest/pytest_iter12.xml`
+
+---
+## Iteration 13 — Push notifications (Emergent-managed relay) (Aug 2026)
+
+### Backend
+- New route `/api/register-push` (POST) added via `backend/routes/push.py`. Body `{user_id, platform, device_token}` → forwards to `POST /api/v1/push/users/register` with `X-Push-Key: $EMERGENT_PUSH_KEY`.
+- `send_push(recipients, data, idempotency_key?)` helper: hits `POST /api/v1/push/trigger`. Skips guest recipient IDs (`guest:*`), dedupes, chunks at 100. Never raises to caller.
+- Wired non-blocking `send_push` calls into event handlers:
+  * Bookings: new booking → provider; PATCH status → counterpart (confirmed / awaiting_confirmation / completed / cancelled).
+  * Messages: new chat message → recipient.
+  * Reviews: new review → provider.
+  * Verification: admin approve/reject → provider.
+- `.env`: `EMERGENT_PUSH_KEY=placeholder` added (deployer replaces at build time).
+- Regression: 120/120 tests pass serially (`-n 0`). The xdist-parallel failures on iter11 auth-flag classes are pre-existing (shared class state + `--dist loadscope`), not caused by push.
+
+### Frontend
+- `expo-notifications` (0.32.17) + `expo-device` (8.0.10) installed via `yarn expo install`.
+- `app.json`: `expo.plugins` includes `expo-notifications` block; `expo.android.googleServicesFile: "./google-services.json"`; `POST_NOTIFICATIONS` permission added.
+- `frontend/google-services.json` provisioned from user-uploaded artifact (Firebase project `khedmapro-69441`).
+- `app/_layout.tsx`: module-scope `setNotificationHandler`, Android `setNotificationChannelAsync("default", MAX)`, `addNotificationResponseReceivedListener` + `getLastNotificationResponseAsync` cold-start check, denied-permission weekly nudge via AsyncStorage. Web-guarded throughout.
+- `src/push.ts`: `registerForPush(userId)` — requests permission → `getDevicePushTokenAsync()` (native, NOT Expo token) → POST `/api/register-push`.
+- Called from `AuthProvider.login/register/refresh` and on bootstrap when a session exists.
+
+### Notes
+- **Package name mismatch**: the user-supplied `google-services.json` targets `com.khedmapro.app`, while `app.json` has `com.emergent.serviceproapp.porjq5`. Android FCM registration will only succeed after either (a) regenerating the Firebase Android app with the correct package or (b) updating `expo.android.package`. This does NOT affect the code path — only the delivered notification will fail silently on Android until the package matches.
+- Push notifications do NOT work in Expo Go or on web (all APIs guarded off). Must be tested on a production/dev-client build after `Publish` → `Generate`.
+- `EMERGENT_PUSH_KEY` is intentionally left as `placeholder`; the deployer replaces this at build time. Do NOT edit.
+
+### Iteration 13 test suite
+- `backend/tests/test_iter13_push.py`: 3/3 pass. Endpoint reachable (returns mapped 500 with placeholder key), rejects malformed bodies (422).
+
+---
+## Iteration 14 — Admin Flags UI + Reveal Phone + Mandatory provider fields (Aug 2026)
+
+### Backend
+- **`routes/auth.py`**: provider registration now enforces
+  * `phone` — required, must be a valid Algerian mobile (E.164 normalized via `normalize_dz_phone`)
+  * `wilaya_code` — required, must be one of the 58 valid DZ wilayas
+  * duplicate phone (409) is rejected
+  * FIX: `phone_e164` is only added to the user doc when a normalized value exists (the sparse unique index rejects explicit `null`)
+- Client registration remains unchanged (phone/wilaya optional).
+
+### Frontend
+- **New: `app/admin/flags.tsx`** — Admin-only screen mirroring the verification queue pattern. Lists all auto-flagged providers, shows a detail sheet with reason/timestamp/completion rate, exposes a "Clear flag & reactivate" action. Non-admin users see a locked-state UI with a "Back to app" CTA.
+- **Profile → Admin section**: added second card that deep-links to `/admin/flags`.
+- **New: `src/RevealPhoneButton.tsx`** — Reusable component that calls `GET /api/users/{id}/phone` and gracefully surfaces the "phone hidden — reveal after confirmation" state. Supports two variants (full-row for bookings, compact pill for chat header). Post-reveal shows a "Call" action via `Linking.openURL('tel:...')`.
+- **`(client)/bookings.tsx`**: replaced the static `client_phone` inline display with the gated `RevealPhoneButton` for every booking that has a real (non-guest) counterpart. Provider-side auth-bookings still show the raw `client_phone` where the API returns it (for backwards compatibility).
+- **`chat/[otherId].tsx`**: compact `RevealPhoneButton` docked in the header, replacing the empty spacer.
+- **`(auth)/register.tsx`**: for providers, the phone field label switches to "Phone (required)"; a `WilayaPicker` is now inline. Client-side validation:
+  * DZ mobile regex (accepts +213, 00213, or leading-0 forms; strips whitespace/punctuation)
+  * wilaya_code must be selected
+- **Language keys** (EN/FR/AR): `flags.*`, `reveal.*`, `auth.phoneRequired`, `auth.wilayaRequired`, `auth.errPhoneProvider`, `auth.errWilaya`.
+
+### Iteration 14 test suite
+- `backend/tests/test_iter14_flags_reveal_register.py`: **10/10 pass** covering
+  * 4x provider registration validation (missing phone, missing wilaya, invalid wilaya code, bad phone format)
+  * 2x happy paths (provider with valid phone+wilaya → 201; client with no phone → 201)
+  * 2x admin flags endpoint contract (admin 200, non-admin 403)
+  * 2x reveal-phone endpoint contract (own id 400, no active booking 403)
+- `test_schedule_chat.py::test_default_schedule_returned_when_none_saved` updated to include phone+wilaya (new mandatory fields).
+
+### Regression
+**Full suite: 133/133 pass** serially (`-n 0`, deselecting one pre-existing seed test). Zero regressions across all previous iterations.
+
+### Frontend verification
+- Web preview at `localhost:3000` renders cleanly.
+- Provider registration screen screenshot confirms `Phone (required)` label, `Wilaya (required)` picker + service category are all present.
+- Admin-forbidden state screenshot on `/admin/flags` confirms the guard works for non-admin users (localised copy visible).
+
+### Notes for the user
+- The DZ phone regex accepts any of: `+213555010101`, `00213555010101`, `0555010101`. Landlines (leading 2/3/4) are rejected — providers must have a mobile number.
+- Wilaya selection uses the shared `WilayaPicker` (already used on the client home). Search + 58 wilayas supported in EN/FR/AR.
+- Reveal endpoint contract unchanged — only unlocks the phone when at least one booking between the two parties is in `confirmed`, `awaiting_confirmation`, or `completed` state.
+
+---
+## Iteration 15 — Package rename + best-effort phone verification + wilaya backfill (Aug 2026)
+
+### Package rename (P0)
+- `app.json`: `ios.bundleIdentifier` and `android.package` both changed from `com.emergent.serviceproapp.porjq5` to **`com.khedmapro.app`** (matches user-provided `google-services.json`).
+
+### Best-effort phone verification (P2)
+- **Schema**: added `phone_verified: bool` + `phone_verified_at` to user docs. `serialize_user` exposes `phone_verified`.
+- **OTP flow (`routes/otp.py`)**: `POST /auth/otp/verify` now sets `phone_verified=True` for both the new-user and existing-user branches.
+- **New endpoint** `POST /auth/verify-my-phone` — authenticated user submits a code to verify the phone already on file. Reuses the existing OTP challenge; does NOT mint a new token. Returns updated serialized user.
+- **Booking gate** (`routes/bookings.py::update_booking_status`): providers cannot transition a booking to `confirmed`, `awaiting_confirmation`, or `completed` unless `phone_verified=True`. Providers CAN still `cancel` (never dead-end the user).
+- **Seed** (`routes/seed.py`): seeded providers get `phone_verified=True` + `phone_verified_at` so demo flows work out of the box. Existing DB providers migrated via one-shot mongosh update.
+- **Frontend**:
+  * `src/PhoneVerifyBanner.tsx` — full red banner + modal flow (Send code → Enter 6-digit → Verify). Rendered on provider dashboard AND at the top of the shared bookings list (only visible when `user.role === "service_provider" && !phone_verified`). Screenshot confirmed on the dashboard.
+  * `src/api.ts::verifyMyPhone(code)` helper.
+  * `User` type extended with `phone_verified?: boolean`.
+  * EN/FR/AR strings for the entire flow.
+- **Testing note**: OTP remains MOCKED — deterministic bcrypt hash of code `910428` is inserted directly in `iter15` tests to avoid depending on backend stdout.
+
+### Wilaya backfill endpoint (P2)
+- **New endpoint** `POST /api/admin/backfill/wilaya` (admin only). Body: `{default_wilaya: "16", dry_run: false}`.
+  * Validates the wilaya against the 58-entry list → 400 on bad codes.
+  * `dry_run=true` returns `{dry_run, would_update, default_wilaya}` without writing.
+  * Live run returns `{updated, default_wilaya}` and stamps `wilaya_backfilled_at`.
+  * Idempotent — subsequent runs return `updated: 0`.
+- Called once via `mongosh` on the test DB to backfill existing seeded providers.
+
+### Iteration 15 test suite
+- `backend/tests/test_iter15_phone_verify_backfill.py`: **12/12 pass**
+  * `phone_verified=False` at registration.
+  * `verify-my-phone` happy path (deterministic mock OTP), invalid code (401), malformed body (422), unauthenticated (401).
+  * Booking confirmation blocked for unverified provider (403) with human-readable detail; cancels remain allowed.
+  * Verified provider can confirm (200).
+  * Backfill: admin-only (403), dry-run no-write, live write, idempotency, rejects bad code.
+
+### Regression
+**Full suite: 145/145 pass** serially (`-n 0`). Zero regressions.
+
+### Next Action Items
+- ⏭ Real SMS provider — currently OTP is MOCKED (fixed code `910428`). For prod launch, integrate an SMS gateway (Twilio, Vonage, or a local Algerian provider).
+- ⏭ Optional: expose a shortcut on the profile screen to trigger phone verification without leaving the tab.

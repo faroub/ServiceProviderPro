@@ -147,6 +147,8 @@ def serialize_user(doc: dict, public: bool = False) -> dict:
         "wilaya_code": doc.get("wilaya_code"),
         "baladiya": doc.get("baladiya"),
         "cross_wilaya": doc.get("cross_wilaya", False),
+        "location_lat": doc.get("location_lat"),
+        "location_lng": doc.get("location_lng"),
         "portfolio_images": [
             (
                 {"url": p, "caption": None, "tags": [], "is_cover": i == 0}
@@ -166,6 +168,9 @@ def serialize_user(doc: dict, public: bool = False) -> dict:
         "last_paid_at": doc.get("last_paid_at"),
         "verification_status": doc.get("verification_status", "unverified"),
         "is_verified": doc.get("verification_status") == "verified",
+        "is_flagged": bool(doc.get("is_flagged")),
+        "search_penalty": doc.get("search_penalty", 0),
+        "phone_verified": bool(doc.get("phone_verified")),
     }
     if not public:
         out["email"] = doc["email"]

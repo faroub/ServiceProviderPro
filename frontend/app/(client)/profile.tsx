@@ -19,6 +19,7 @@ import { useT } from "@/src/language";
 import { LanguageSwitcher } from "@/src/LanguageSwitcher";
 import { api } from "@/src/api";
 import { VerificationCard } from "@/src/VerificationCard";
+import { PhoneVerifyBanner } from "@/src/PhoneVerifyBanner";
 
 type ConfirmKind = "deactivate" | "reactivate" | "delete" | null;
 
@@ -50,9 +51,19 @@ export default function Profile() {
   const onPay = async () => {
     setPaying(true);
     try {
-      await api.paySubscription();
-      await refresh();
-      showToast(t("account.paySuccess"));
+      const r: any = await api.paySubscription();
+      if (r && r.checkout_url) {
+        // Real Chargily flow — open the hosted checkout in the in-app browser.
+        // Payment confirmation happens via server webhook; we refresh status on return.
+        const WB = await import("expo-web-browser");
+        await WB.openBrowserAsync(r.checkout_url);
+        await refresh();
+        showToast(t("account.paySuccess"));
+      } else {
+        // Mock success path
+        await refresh();
+        showToast(t("account.paySuccess"));
+      }
     } catch (e: any) {
       showToast(e?.message || "Error");
     }
@@ -188,23 +199,38 @@ export default function Profile() {
 
         {/* ============ Admin (admin users only) ============ */}
         {user.is_admin && (
-          <Pressable
-            testID="admin-panel-link"
-            style={styles.dangerCardActive}
-            onPress={() => router.push("/admin/verification")}
-          >
-            <Ionicons name="shield-checkmark" size={22} color={theme.colors.brand} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.dangerTitle}>{t("admin.title")}</Text>
-              <Text style={styles.dangerSub}>{t("admin.empty")}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
-          </Pressable>
+          <>
+            <Pressable
+              testID="admin-panel-link"
+              style={styles.dangerCardActive}
+              onPress={() => router.push("/admin/verification")}
+            >
+              <Ionicons name="shield-checkmark" size={22} color={theme.colors.brand} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dangerTitle}>{t("admin.title")}</Text>
+                <Text style={styles.dangerSub}>{t("admin.empty")}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
+            </Pressable>
+            <Pressable
+              testID="admin-flags-link"
+              style={styles.dangerCardActive}
+              onPress={() => router.push("/admin/flags")}
+            >
+              <Ionicons name="flag" size={22} color={theme.colors.error} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dangerTitle}>{t("flags.section")}</Text>
+                <Text style={styles.dangerSub}>{t("flags.sectionSub")}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
+            </Pressable>
+          </>
         )}
 
         {/* ============ Verification (providers only) ============ */}
         {isProvider && (
           <>
+            <PhoneVerifyBanner />
             <Text style={styles.sectionLabel}>{t("verify.title")}</Text>
             <VerificationCard />
           </>
@@ -314,6 +340,22 @@ export default function Profile() {
             <Text style={styles.dangerSub}>{t("account.deleteSub")}</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={theme.colors.error} />
+        </Pressable>
+
+        <Pressable
+          testID="switch-role-btn"
+          onPress={async () => {
+            await logout();
+            router.replace("/");
+          }}
+          style={styles.switchRoleCard}
+        >
+          <Ionicons name="swap-horizontal-outline" size={22} color={theme.colors.brand} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.switchRoleTitle}>{t("account.switchRole")}</Text>
+            <Text style={styles.switchRoleSub}>{t("account.switchRoleSub")}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
         </Pressable>
 
         <Pressable testID="logout-btn" onPress={onLogout} style={styles.logout}>
@@ -593,6 +635,19 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.error,
   },
   logoutText: { color: theme.colors.error, fontSize: 15, fontWeight: "700" },
+  switchRoleCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.md,
+    padding: theme.spacing.md,
+    marginTop: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  switchRoleTitle: { color: theme.colors.onSurface, fontWeight: "700", fontSize: 15 },
+  switchRoleSub: { color: theme.colors.onSurfaceSecondary, fontSize: 12, marginTop: 2 },
 
   // Toast
   toast: {

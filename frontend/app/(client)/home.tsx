@@ -13,12 +13,28 @@ import { useAuth } from "@/src/auth";
 import { theme } from "@/src/theme";
 import { useT } from "@/src/language";
 import { WilayaPicker } from "@/src/WilayaPicker";
+import { type DropdownOption } from "@/src/Dropdown";
+import { FiltersSheet, FiltersPill } from "@/src/FiltersSheet";
+import { getClientLocation, peekLocationCache, type Coords } from "@/src/utils/location";
+
+// Radius presets in kilometers. "wilaya" and "country" are sentinel scopes.
+type ScopeKey = "2" | "5" | "10" | "25" | "50" | "wilaya" | "country";
+const SCOPE_PRESETS: { key: ScopeKey; km?: number }[] = [
+  { key: "2", km: 2 },
+  { key: "5", km: 5 },
+  { key: "10", km: 10 },
+  { key: "25", km: 25 },
+  { key: "50", km: 50 },
+  { key: "wilaya" },
+  { key: "country" },
+];
 
 type Category = { id: string; name: string; icon: string };
 type Provider = {
   id: string; full_name: string; category?: string; hourly_rate?: number;
   task_rate?: number; city?: string; avatar_url?: string; rating: number;
   reviews_count: number; bio?: string;
+  distance_km?: number | null;
 };
 
 export default function Home() {
@@ -32,12 +48,51 @@ export default function Home() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Default: "Near me" 5 km. On first GPS attempt we fall back to wilaya/country if denied.
+  const [scope, setScope] = useState<ScopeKey>("5");
+  const [coords, setCoords] = useState<Coords | null>(peekLocationCache());
+  const [locationDenied, setLocationDenied] = useState(false);
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Resolve GPS lazily the first time a radius scope is active. If permission
+  // is denied, fall back to the user's profile wilaya (or All Algeria).
+  useEffect(() => {
+    const km = SCOPE_PRESETS.find((p) => p.key === scope)?.km;
+    if (km == null) return;               // "wilaya" / "country" scopes don't need GPS
+    if (coords) return;                    // already have it
+    (async () => {
+      const c = await getClientLocation();
+      if (c) {
+        setCoords(c);
+        setLocationDenied(false);
+      } else {
+        setLocationDenied(true);
+        // Auto-fallback: user's own wilaya if set, else whole country.
+        if (user?.wilaya_code) {
+          setScope("wilaya");
+          setWilayaCode(user.wilaya_code);
+        } else {
+          setScope("country");
+        }
+      }
+    })();
+  }, [scope, coords, user?.wilaya_code]);
 
   const load = useCallback(async () => {
     try {
+      const km = SCOPE_PRESETS.find((p) => p.key === scope)?.km;
+      const useRadius = km != null && coords != null;
       const [cats, provs] = await Promise.all([
         api.categories(),
-        api.providers({ category: selectedCat || undefined, search: search || undefined, wilaya: wilayaCode || undefined }),
+        api.providers({
+          category: selectedCat || undefined,
+          search: search || undefined,
+          wilaya: scope === "wilaya" ? (wilayaCode || undefined) : undefined,
+          lat: useRadius ? coords!.lat : undefined,
+          lng: useRadius ? coords!.lng : undefined,
+          radius_km: useRadius ? km : undefined,
+        }),
       ]);
       setCategories(cats as any);
       setProviders(provs as any);
@@ -47,7 +102,7 @@ export default function Home() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedCat, search, wilayaCode]);
+  }, [selectedCat, search, wilayaCode, scope, coords]);
 
   useEffect(() => {
     load();
@@ -59,6 +114,10 @@ export default function Home() {
   };
 
   const featured = useMemo(() => providers.slice(0, 5), [providers]);
+  const displayed = useMemo(
+    () => (verifiedOnly ? providers.filter((p: any) => p.is_verified) : providers),
+    [providers, verifiedOnly]
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
@@ -88,36 +147,55 @@ export default function Home() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.brand} />}
       >
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={18} color={theme.colors.muted} />
-          <TextInput
-            testID="search-input"
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-            placeholder={t("home.searchPlaceholder")}
-            placeholderTextColor={theme.colors.muted}
-            returnKeyType="search"
+        <View style={styles.searchRow}>
+          <View style={styles.searchWrap}>
+            <Ionicons name="search" size={18} color={theme.colors.muted} />
+            <TextInput
+              testID="search-input"
+              style={styles.searchInput}
+              value={search}
+              onChangeText={setSearch}
+              placeholder={t("home.searchPlaceholder")}
+              placeholderTextColor={theme.colors.muted}
+              returnKeyType="search"
+            />
+          </View>
+          <FiltersPill
+            testID="filters-pill"
+            activeCount={
+              (scope !== "5" ? 1 : 0) + (selectedCat ? 1 : 0) + (verifiedOnly ? 1 : 0)
+            }
+            label={t("filters.title")}
+            onPress={() => setFiltersOpen(true)}
           />
         </View>
 
-        <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md, flexDirection: "row", gap: theme.spacing.sm }}>
-          <WilayaPicker
-            testID="home-wilaya-picker"
-            compact
-            value={wilayaCode}
-            onSelect={(code) => setWilayaCode(code)}
-            label={t("wilaya.filterAll")}
-          />
-          {wilayaCode && (
-            <Pressable testID="clear-wilaya-btn" onPress={() => setWilayaCode(null)} style={{
-              paddingHorizontal: 10, height: 36, borderRadius: theme.radius.pill,
-              borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center",
-            }}>
-              <Ionicons name="close" size={16} color={theme.colors.muted} />
-            </Pressable>
-          )}
-        </View>
+        {locationDenied && SCOPE_PRESETS.find((p) => p.key === scope)?.km != null && (
+          <View style={styles.locHint} testID="location-denied-hint">
+            <Ionicons name="information-circle-outline" size={14} color={theme.colors.warning} />
+            <Text style={styles.locHintText}>{t("home.locationDenied")}</Text>
+          </View>
+        )}
+
+        {scope === "wilaya" && (
+          <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md, flexDirection: "row", gap: theme.spacing.sm }}>
+            <WilayaPicker
+              testID="home-wilaya-picker"
+              compact
+              value={wilayaCode}
+              onSelect={(code) => setWilayaCode(code)}
+              label={t("wilaya.filterAll")}
+            />
+            {wilayaCode && (
+              <Pressable testID="clear-wilaya-btn" onPress={() => setWilayaCode(null)} style={{
+                paddingHorizontal: 10, height: 36, borderRadius: theme.radius.pill,
+                borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center",
+              }}>
+                <Ionicons name="close" size={16} color={theme.colors.muted} />
+              </Pressable>
+            )}
+          </View>
+        )}
 
         <View style={styles.promoWrap}>
           <ImageBackground
@@ -138,34 +216,8 @@ export default function Home() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{t("home.categories")}</Text>
+          <Text style={styles.sectionTitle}>{selectedCat ? t(`cat.${selectedCat}`) : t("home.categories")}</Text>
         </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRowContent}
-          style={styles.chipRow}
-        >
-          <Pressable
-            testID="cat-chip-all"
-            onPress={() => setSelectedCat(null)}
-            style={[styles.chip, !selectedCat && styles.chipActive]}
-          >
-            <Text style={[styles.chipText, !selectedCat && styles.chipTextActive]}>{t("home.all")}</Text>
-          </Pressable>
-          {categories.map((c) => (
-            <Pressable
-              key={c.id}
-              testID={`cat-chip-${c.id}`}
-              onPress={() => setSelectedCat(c.id)}
-              style={[styles.chip, selectedCat === c.id && styles.chipActive]}
-            >
-              <Ionicons name={c.icon as any} size={14} color={selectedCat === c.id ? theme.colors.onBrandPrimary : theme.colors.brand} />
-              <Text style={[styles.chipText, selectedCat === c.id && styles.chipTextActive]}>{t(`cat.${c.id}`)}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
 
         {featured.length > 0 && (
           <>
@@ -211,19 +263,19 @@ export default function Home() {
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{t("home.allProviders")}</Text>
-          <Text style={styles.sectionCount}>{providers.length}</Text>
+          <Text style={styles.sectionCount}>{displayed.length}</Text>
         </View>
 
         {loading ? (
           <ActivityIndicator color={theme.colors.brand} style={{ marginTop: theme.spacing.xl }} />
-        ) : providers.length === 0 ? (
+        ) : displayed.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="search-outline" size={40} color={theme.colors.muted} />
             <Text style={styles.emptyText}>{t("home.noResults")}</Text>
           </View>
         ) : (
           <View style={{ paddingHorizontal: theme.spacing.xl, gap: theme.spacing.md }}>
-            {providers.map((p) => (
+            {displayed.map((p) => (
               <Pressable
                 key={p.id}
                 testID={`provider-${p.id}`}
@@ -246,6 +298,17 @@ export default function Home() {
                     <Text style={styles.providerReviews}>({p.reviews_count})</Text>
                     <View style={styles.dot} />
                     <Text style={styles.providerRate}>{p.hourly_rate ?? "-"} {t("provider.perHour")}</Text>
+                    {p.distance_km != null && (
+                      <>
+                        <View style={styles.dot} />
+                        <Ionicons name="navigate" size={11} color={theme.colors.brand} />
+                        <Text style={styles.providerDistance}>
+                          {p.distance_km < 1
+                            ? t("home.distanceMeters", { m: Math.round(p.distance_km * 1000) })
+                            : t("home.distanceKm", { km: p.distance_km.toFixed(1) })}
+                        </Text>
+                      </>
+                    )}
                   </View>
                 </View>
                 <Ionicons name={isRTL ? "chevron-back" : "chevron-forward"} size={20} color={theme.colors.muted} />
@@ -254,6 +317,45 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
+
+      <FiltersSheet
+        visible={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        state={{ scope, category: selectedCat, verifiedOnly }}
+        scopeOptions={SCOPE_PRESETS.map<DropdownOption>((p) => ({
+          value: p.key,
+          label:
+            p.key === "wilaya"
+              ? t("home.scope.wilaya")
+              : p.key === "country"
+              ? t("home.scope.country")
+              : t("home.scope.km", { km: p.km! }),
+          icon:
+            p.key === "country"
+              ? "flag-outline"
+              : p.key === "wilaya"
+              ? "map-outline"
+              : "locate-outline",
+        }))}
+        categoryOptions={categories.map<DropdownOption>((c) => ({
+          value: c.id,
+          label: t(`cat.${c.id}`),
+          icon: c.icon as any,
+        }))}
+        onApply={(next) => {
+          const key = (next.scope || "5") as ScopeKey;
+          setScope(key);
+          if (key !== "wilaya") setWilayaCode(null);
+          setSelectedCat(next.category);
+          setVerifiedOnly(!!next.verifiedOnly);
+        }}
+        onReset={() => {
+          setScope("5");
+          setSelectedCat(null);
+          setVerifiedOnly(false);
+          setWilayaCode(null);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -280,8 +382,9 @@ const styles = StyleSheet.create({
   },
   signInText: { color: theme.colors.onBrandPrimary, fontWeight: "700", fontSize: 13 },
   searchWrap: {
+    flex: 1,
     flexDirection: "row", alignItems: "center", gap: theme.spacing.sm,
-    marginHorizontal: theme.spacing.xl, paddingHorizontal: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
     backgroundColor: theme.colors.surfaceSecondary,
     borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.colors.border,
   },
@@ -305,6 +408,19 @@ const styles = StyleSheet.create({
   sectionCount: { color: theme.colors.muted, fontSize: 13 },
   chipRow: { height: 56 },
   chipRowContent: { paddingHorizontal: theme.spacing.xl, gap: theme.spacing.sm, alignItems: "center" },
+  filtersRow: {
+    flexDirection: "row",
+    gap: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xl,
+    marginTop: theme.spacing.md,
+  },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: theme.spacing.xl,
+    gap: theme.spacing.sm,
+    marginTop: theme.spacing.md,
+  },
   chip: {
     flexDirection: "row", alignItems: "center", gap: 6,
     paddingHorizontal: theme.spacing.md, height: 36,
@@ -343,6 +459,16 @@ const styles = StyleSheet.create({
   providerReviews: { color: theme.colors.muted, fontSize: 12 },
   dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: theme.colors.muted, marginHorizontal: 4 },
   providerRate: { color: theme.colors.onSurfaceSecondary, fontSize: 12, fontWeight: "600" },
+  providerDistance: { color: theme.colors.brand, fontSize: 12, fontWeight: "700" },
+  locHint: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginHorizontal: theme.spacing.xl, marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md, paddingVertical: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    backgroundColor: "rgba(255,171,0,0.10)",
+    borderWidth: 1, borderColor: "rgba(255,171,0,0.35)",
+  },
+  locHintText: { flex: 1, color: theme.colors.warning, fontSize: 12, fontWeight: "600" },
   empty: { alignItems: "center", gap: theme.spacing.sm, paddingVertical: theme.spacing.xxl },
   emptyText: { color: theme.colors.muted, fontSize: 14 },
 });

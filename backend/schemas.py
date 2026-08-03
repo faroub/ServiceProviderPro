@@ -13,6 +13,7 @@ class Role(str, Enum):
 class BookingStatus(str, Enum):
     pending = "pending"
     confirmed = "confirmed"
+    awaiting_confirmation = "awaiting_confirmation"
     completed = "completed"
     cancelled = "cancelled"
 
@@ -86,6 +87,12 @@ class OtpVerifyIn(BaseModel):
     role: Role = Role.client
 
 
+class VerifyMyPhoneIn(BaseModel):
+    """OTP verification for an authenticated user (marks phone as verified,
+    does NOT create/return a session token)."""
+    code: str = Field(pattern=r"^\d{6}$")
+
+
 # ---------- Profile / portfolio ----------
 class ProfileCompleteIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=100)
@@ -97,6 +104,9 @@ class ProfileCompleteIn(BaseModel):
     wilaya_code: Optional[str] = None
     baladiya: Optional[str] = None
     cross_wilaya: Optional[bool] = None
+    # Provider service-area pin (used for radius search from client location).
+    location_lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    location_lng: Optional[float] = Field(default=None, ge=-180, le=180)
 
 
 class PortfolioItemIn(BaseModel):

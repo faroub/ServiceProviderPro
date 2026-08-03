@@ -20,11 +20,13 @@ Feature code has moved to focused modules:
 - `routes/*.py`       — one file per feature area
 """
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from starlette.staticfiles import StaticFiles
 
 from database import client, db
 from routes import build_api_router
@@ -39,6 +41,13 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="khedmaPro API")
 app.include_router(build_api_router())
+
+# Marketing website (static HTML). Mounted at /api/site because Kubernetes
+# ingress routes /api/* to this backend service. html=True enables directory
+# index resolution so /api/site/ serves index.html.
+_site_dir = os.path.join(os.path.dirname(__file__), "site")
+if os.path.isdir(_site_dir):
+    app.mount("/api/site", StaticFiles(directory=_site_dir, html=True), name="site")
 
 # WebSocket chat lives on the app directly (path already includes /api).
 app.add_api_websocket_route("/api/ws/chat", ws_chat)
@@ -70,9 +79,42 @@ async def on_startup():
     await db.users.create_index("wilaya_code")
     await db.reports.create_index("provider_id")
     await db.users.create_index("verification_status")
+    await db.users.create_index([("location_lat", 1), ("location_lng", 1)])
 
-    # One-shot category migration: the previous "admin_education" category was
-    # split into "admin_consulting" and "education (private tutoring)".
+    # One-shot: backfill approximate location coordinates for existing providers
+    # from their wilaya's centroid (nudged with a tiny per-provider offset so
+    # they don't all collapse onto a single map pin). Runs only for providers
+    # who don't yet have `location_lat`/`location_lng` set.
+    try:
+        from wilaya_geo import WILAYA_CENTROIDS
+        import hashlib
+
+        missing = db.users.find(
+            {
+                "role": Role.service_provider.value,
+                "wilaya_code": {"$exists": True, "$ne": None},
+                "$or": [{"location_lat": None}, {"location_lat": {"$exists": False}}],
+            },
+            {"_id": 0, "id": 1, "wilaya_code": 1},
+        )
+        async for doc in missing:
+            centroid = WILAYA_CENTROIDS.get(doc.get("wilaya_code") or "")
+            if not centroid:
+                continue
+            # Deterministic ~±0.01° (~1 km) offset from the wilaya centroid.
+            h = int(hashlib.sha1(doc["id"].encode()).hexdigest(), 16)
+            lat_off = ((h % 200) - 100) / 10000.0
+            lng_off = (((h // 200) % 200) - 100) / 10000.0
+            await db.users.update_one(
+                {"id": doc["id"]},
+                {"$set": {
+                    "location_lat": centroid[0] + lat_off,
+                    "location_lng": centroid[1] + lng_off,
+                    "location_source": "wilaya_centroid",
+                }},
+            )
+    except Exception as e:
+        logger.warning("Location backfill skipped: %s", e)
     try:
         migrated = await db.users.update_many(
             {"category": "admin_education"},

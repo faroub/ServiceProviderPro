@@ -20,6 +20,8 @@ import { useAuth } from "@/src/auth";
 import { theme } from "@/src/theme";
 import { useT } from "@/src/language";
 import { bookingsStore } from "@/src/db/localDb";
+import { RevealPhoneButton } from "@/src/RevealPhoneButton";
+import { PhoneVerifyBanner } from "@/src/PhoneVerifyBanner";
 import type { LocalBooking } from "@/src/db/schema";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -84,6 +86,10 @@ export default function Bookings() {
   const updateStatus = async (id: string, status: string) => {
     try {
       await api.updateBookingStatus(id, status);
+      // When client confirms completion → prompt for review immediately.
+      if (!isProvider && status === "completed") {
+        router.push(`/review/${id}`);
+      }
       load();
     } catch (e: any) {
       console.log(e);
@@ -148,6 +154,7 @@ export default function Bookings() {
           data={filtered}
           keyExtractor={(b) => b.id}
           contentContainerStyle={{ padding: theme.spacing.xl, paddingBottom: 100, gap: theme.spacing.md }}
+          ListHeaderComponent={<PhoneVerifyBanner />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -197,6 +204,23 @@ export default function Bookings() {
                   <Text style={styles.cardMetaText} numberOfLines={1}>{item.client_phone}</Text>
                 </View>
               )}
+              {/* Reveal counterpart phone: provider→guest bookings inline the phone
+                  already (client_phone above). For every other booking, use the
+                  gated reveal endpoint which only unlocks after confirmation. */}
+              {(() => {
+                const counterpartId = isProvider ? item.client_id : item.provider_id;
+                const alreadyShown = isProvider && !!item.client_phone;
+                if (!counterpartId || counterpartId.startsWith("guest:") || alreadyShown) return null;
+                return (
+                  <View style={styles.revealRow}>
+                    <RevealPhoneButton
+                      otherId={counterpartId}
+                      bookingStatus={item.status}
+                      testID={`reveal-${item.id}`}
+                    />
+                  </View>
+                );
+              })()}
               {item.estimated_total ? (
                 <Text style={styles.cardTotal}>≈ {item.estimated_total} DZD</Text>
               ) : null}
@@ -250,7 +274,22 @@ export default function Bookings() {
                     style={[styles.actionBtn, styles.actionPrimary]}
                     onPress={() => updateStatus(item.id, "completed")}
                   >
-                    <Text style={styles.actionPrimaryText}>{t("bookings.markComplete")}</Text>
+                    <Text style={styles.actionPrimaryText}>{t("bookings.markWorkDone")}</Text>
+                  </Pressable>
+                )}
+                {isProvider && item.status === "awaiting_confirmation" && (
+                  <View style={[styles.actionBtn, styles.actionOutline]}>
+                    <Text style={styles.actionOutlineText}>{t("bookings.awaitingClient")}</Text>
+                  </View>
+                )}
+                {!isProvider && item.status === "awaiting_confirmation" && (
+                  <Pressable
+                    testID={`confirm-done-${item.id}`}
+                    style={[styles.actionBtn, styles.actionPrimary]}
+                    onPress={() => updateStatus(item.id, "completed")}
+                  >
+                    <Ionicons name="checkmark-done" size={14} color={theme.colors.onBrandPrimary} />
+                    <Text style={styles.actionPrimaryText}>{t("bookings.confirmDone")}</Text>
                   </Pressable>
                 )}
                 {!isProvider && (item.status === "pending" || item.status === "confirmed") && (
@@ -382,6 +421,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   noteText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  revealRow: { marginTop: 2 },
 
   // Modal
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
