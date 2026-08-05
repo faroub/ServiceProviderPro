@@ -7,11 +7,12 @@ import {
   ImageBackground,
   ActivityIndicator,
   ScrollView,
+  Keyboard,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter, Redirect } from "expo-router";
+import { useRouter, Redirect, useFocusEffect } from "expo-router";
 import { useAuth } from "@/src/auth";
 import { theme } from "@/src/theme";
 import { useT } from "@/src/language";
@@ -35,6 +36,16 @@ export default function Index() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const { t, isRTL } = useT();
+
+  // Ensure any lingering keyboard from a previous screen is dismissed
+  // as soon as the landing screen becomes focused. This prevents a leftover
+  // empty "gap" at the bottom on Android when navigating back with the
+  // soft keyboard still visible.
+  useFocusEffect(
+    React.useCallback(() => {
+      Keyboard.dismiss();
+    }, [])
+  );
 
   if (loading) {
     return (
@@ -141,14 +152,22 @@ export default function Index() {
             <Ionicons name={isRTL ? "arrow-back" : "arrow-forward"} size={18} color={theme.colors.onBrandPrimary} />
           </Pressable>
 
-          <View style={styles.dualBtnRow}>
+          <View style={styles.stackedBtnCol}>
             <Pressable
               testID="onboarding-otp-btn"
               onPress={() => router.push("/(auth)/otp")}
               style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.85 }]}
             >
               <Ionicons name="phone-portrait-outline" size={16} color={theme.colors.onSurface} />
-              <Text style={styles.secondaryBtnText} numberOfLines={1}>{t("otp.title")}</Text>
+              <Text
+                style={styles.secondaryBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}
+                allowFontScaling={false}
+              >
+                {t("onboarding.phoneLogin")}
+              </Text>
             </Pressable>
             <Pressable
               testID="continue-as-provider-btn"
@@ -156,7 +175,15 @@ export default function Index() {
               style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.85 }]}
             >
               <Ionicons name="briefcase" size={16} color={theme.colors.onSurface} />
-              <Text style={styles.secondaryBtnText} numberOfLines={1}>{t("onboarding.iamProvider")}</Text>
+              <Text
+                style={styles.secondaryBtnText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}
+                allowFontScaling={false}
+              >
+                {t("onboarding.iamProvider")}
+              </Text>
             </Pressable>
           </View>
 
@@ -299,16 +326,14 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     textAlign: "center",
   },
-  dualBtnRow: {
-    flexDirection: "row",
+  stackedBtnCol: {
     gap: theme.spacing.sm,
   },
   secondaryBtn: {
-    flex: 1,
     flexDirection: "row",
     gap: 6,
     paddingVertical: 14,
-    paddingHorizontal: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
     borderRadius: theme.radius.pill,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
@@ -316,7 +341,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  secondaryBtnText: { color: theme.colors.onSurface, fontSize: 13, fontWeight: "700", flexShrink: 1 },
+  secondaryBtnText: { color: theme.colors.onSurface, fontSize: 14, fontWeight: "700", flexShrink: 1, textAlign: "center" },
   loginLink: { alignItems: "center", paddingTop: theme.spacing.sm },
   loginLinkText: { color: theme.colors.onSurfaceSecondary, fontSize: 14 },
 });
