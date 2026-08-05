@@ -1,0 +1,52 @@
+Here's the full picture of what's already built for you as admin, plus a quick recommendation on how to level it up.
+
+## 🔑 Admin credentials
+- Email: `admin@khedmapro.dz`
+- Password: `admin123`
+- (Full list in `/app/memory/test_credentials.md`)
+
+## 📱 In-app admin screens (already built)
+Once logged in as admin, you land in the mobile app with two dedicated screens:
+
+1. **`/admin/verification`** — Provider verification queue
+   - See pending provider verification requests (national ID, business docs, selfies).
+   - Approve or reject each request; approved providers get a green "Verified" badge, rejected get a note.
+
+2. **`/admin/flags`** — Abuse/report queue
+   - Auto-flagged providers (e.g., multiple no-show reports, low ratings, fraud complaints).
+   - Manually clear a flag once reviewed, or take action (deactivate).
+
+## 🌐 Admin backend endpoints
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/admin/verification/pending` | List providers awaiting verification |
+| `POST /api/admin/verification/{id}/approve` | Approve provider |
+| `POST /api/admin/verification/{id}/reject` | Reject provider |
+| `GET /api/admin/flags` | List all flagged providers |
+| `POST /api/admin/flags/{id}/clear` | Clear a flag |
+| `POST /api/admin/backfill/wilaya` | Assign default wilaya to legacy accounts |
+
+## 📊 What's currently *missing* for a great admin experience
+
+There's no unified **overview dashboard** — you'd have to jump between screens to see totals. Also no way to:
+- View KPIs (total users, providers, bookings, revenue, GMV)
+- Deactivate a user / reset a phone number from the app
+- Search for a specific user or booking
+- See platform commission earned this month
+- Filter reports by reason / severity
+- Broadcast a push notification to users
+
+## 🚀 Suggested next step — build a proper **Admin Dashboard hub**
+
+I can add a new `/admin/index.tsx` home screen with:
+
+1. 📊 **KPI cards**: total clients, providers (active/pending/deactivated), bookings this month, platform commission (DZD), open flags, pending verifications.
+2. 🔍 **User search & manage**: find any user by phone/email → view profile → deactivate / reactivate / force-verify / delete.
+3. 🧾 **Bookings monitor**: recent bookings list with status filters (pending/confirmed/completed/disputed).
+4. 🚨 **Flags dashboard v2**: filter by reason, severity, wilaya; take action inline.
+5. ✅ **Verification queue** (existing screen, linked here).
+6. 💰 **Revenue view**: monthly subscription revenue + commission (already tracked in DB — `platform_commission_dzd`).
+7. 📢 **Broadcast tool**: send push notification to all providers / clients / by wilaya (uses existing push infra).
+8. ⚙️ **Utility actions**: run wilaya backfill, re-seed demo data, export CSV.
+
+**Would you like me to build this Admin Dashboard hub?** If yes, tell me which of the 8 features are must-haves for v1 (or say "all") and I'll get started. I'd suggest starting with **1 (KPI cards) + 2 (user search) + 3 (bookings monitor) + 7 (broadcast)** as the highest-value slice.
