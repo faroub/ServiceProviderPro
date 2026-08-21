@@ -86,9 +86,6 @@ async def admin_create_category(
     user: Annotated[dict, Depends(current_user)],
 ):
     require_admin(user)
-    existing = await db.categories.find_one({"id": body.id}, {"_id": 0, "id": 1})
-    if existing:
-        raise HTTPException(status_code=409, detail="Category id already exists")
     now_iso = datetime.now(timezone.utc).isoformat()
     order = body.order
     if order is None:
@@ -101,7 +98,16 @@ async def admin_create_category(
         "created_at": now_iso,
         "updated_at": now_iso,
     }
-    await db.categories.insert_one(dict(doc))
+    # Insert the category document, handling potential race conditions
+    try:
+        await db.categories.insert_one(dict(doc))
+    except Exception as e:
+        # Check if it's a duplicate key error
+        if "E11000 duplicate key error" in str(e) or "duplicate key" in str(e).lower():
+            raise HTTPException(status_code=409, detail="Category id already exists")
+        else:
+            # Re-raise if it's not a duplicate key error
+            raise
     return _sanitize(doc)
 
 
@@ -213,17 +219,41 @@ async def admin_import_categories(
             stats["removed"] += 1
 
     for cat in body.categories:
-        existing = await db.categories.find_one({"id": cat.id}, {"_id": 0, "id": 1})
-        doc = {**cat.model_dump(), "updated_at": now_iso}
-        if cat.order is None:
-            doc.pop("order", None)
-        if existing:
-            await db.categories.update_one({"id": cat.id}, {"$set": doc})
-            stats["updated"] += 1
-        else:
-            doc.setdefault("order", len(await db.categories.find({}, {"_id": 0, "order": 1}).to_list(500)))
-            doc["created_at"] = now_iso
-            await db.categories.insert_one(dict(doc))
-            stats["created"] += 1
+            doc = {**cat.model_dump(), "updated_at": now_iso}
+            if cat.order is None:
+                doc.pop("order", None)
+
+            # Upsert the category document, handling potential race conditions
+            try:
+                if cat.order is None:
+                    # For insert, we need to determine the order
+                    doc.setdefault("order", len(await db.categories.find({}, {"_id": 0, "order": 1}).to_list(500)))
+                    doc["created_at"] = now_iso
+                    await db.categories.insert_one(dict(doc))
+                    stats["created"] += 1
+                else:
+                    # For update with specific order, or if we're doing an update
+                    result = await db.categories.update_one(
+                        {"id": cat.id},
+                        {"$set": doc},
+                        upsert=True
+                    )
+                    if result.upserted_id:
+                        stats["created"] += 1
+                    elif result.modified_count > 0:
+                        stats["updated"] += 1
+                    # If neither upserted nor modified, it means the document existed but wasn't changed
+            except Exception as e:
+                # Check if it's a duplicate key error (shouldn't happen with upsert, but just in case)
+                if "E11000 duplicate key error" in str(e) or "duplicate key" in str(e).lower():
+                    # Try again as a pure update
+                    await db.categories.update_one(
+                        {"id": cat.id},
+                        {"$set": doc}
+                    )
+                    stats["updated"] += 1
+                else:
+                    # Re-raise if it's not a duplicate key error
+                    raise
 
     return {"success": True, "stats": stats}

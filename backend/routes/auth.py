@@ -50,10 +50,6 @@ async def register(body: RegisterIn):
     normalized_phone = None
     if body.phone and body.phone.strip():
         normalized_phone = normalize_dz_phone(body.phone.strip())
-        # Reject duplicates so we never seed two providers on the same number.
-        existing_phone = await db.users.find_one({"phone_e164": normalized_phone})
-        if existing_phone:
-            raise HTTPException(status_code=409, detail="This phone number is already registered")
 
     # Enforce OTP verification BEFORE the provider account is created. Clients
     # aren't subject to this because they can browse anonymously.
@@ -109,7 +105,23 @@ async def register(body: RegisterIn):
     # a sparse UNIQUE index on this field, which rejects explicit nulls.
     if normalized_phone:
         doc["phone_e164"] = normalized_phone
-    await db.users.insert_one(doc)
+
+    # Insert the user document, handling potential race conditions
+    try:
+        await db.users.insert_one(doc)
+    except Exception as e:
+        # Check if it's a duplicate key error
+        if "E11000 duplicate key error" in str(e) or "duplicate key" in str(e).lower():
+            # Determine which field caused the duplicate
+            if await db.users.find_one({"email": email}):
+                raise HTTPException(status_code=409, detail="Email is already registered")
+            if normalized_phone and await db.users.find_one({"phone_e164": normalized_phone}):
+                raise HTTPException(status_code=409, detail="This phone number is already registered")
+            # If we can't determine the exact field, give a generic message
+            raise HTTPException(status_code=409, detail="A user with that email or phone already exists")
+        else:
+            # Re-raise if it's not a duplicate key error
+            raise
     token = make_token(user_id, body.role.value)
     return {"access_token": token, "token_type": "bearer", "user": serialize_user(doc)}
 

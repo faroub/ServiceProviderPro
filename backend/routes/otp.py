@@ -105,6 +105,8 @@ async def verify_otp(body: OtpVerifyIn):
     if deleted.deleted_count != 1:
         raise HTTPException(status_code=401, detail="Invalid or expired verification code")
 
+    # Try to find existing user, but be ready to handle race condition where
+    # another request might create the user between our check and insert
     user = await db.users.find_one({"phone_e164": phone}, {"_id": 0})
     is_new = user is None
     if is_new:
@@ -133,9 +135,24 @@ async def verify_otp(body: OtpVerifyIn):
             "phone_verified": True,  # OTP was just verified
             "phone_verified_at": now.isoformat(),
         }
-        await db.users.insert_one(user_doc)
-        user = user_doc
-    else:
+        # Insert the new user document, handling potential race conditions
+        try:
+            await db.users.insert_one(user_doc)
+            user = user_doc
+        except Exception as e:
+            # Check if it's a duplicate key error (race condition)
+            if "E11000 duplicate key error" in str(e) or "duplicate key" in str(e).lower():
+                # Another request beat us to creating the user, so fetch it
+                user = await db.users.find_one({"phone_e164": phone}, {"_id": 0})
+                if not user:
+                    # If we still can't find it, re-raise the original error
+                    raise
+                is_new = False  # It's not new after all
+            else:
+                # Re-raise if it's not a duplicate key error
+                raise
+
+    if not is_new:
         user = await enforce_lifecycle(user)
         if user.get("is_deleted"):
             raise HTTPException(status_code=410, detail="This account has been deleted")
@@ -231,15 +248,17 @@ async def verify_otp_for_registration(body: OtpVerifyForRegistrationIn):
     if not bcrypt.checkpw(body.code.encode(), challenge["code_hash"].encode()):
         raise HTTPException(status_code=401, detail="Invalid or expired verification code")
 
-    # If the number already belongs to an account, block registration here so
-    # the caller doesn't waste time filling the rest of the form.
-    if await db.users.find_one({"phone_e164": phone}):
-        raise HTTPException(status_code=409, detail="This phone number is already registered")
-
     # Single-use — burn the challenge.
     deleted = await db.otp_challenges.delete_one({"phone_e164": phone})
     if deleted.deleted_count != 1:
         raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+
+    # If the number already belongs to an account, block registration here so
+    # the caller doesn't waste time filling the rest of the form.
+    # We do this AFTER burning the challenge to avoid race conditions
+    # where another request registers the phone between our check and token creation.
+    if await db.users.find_one({"phone_e164": phone}):
+        raise HTTPException(status_code=409, detail="This phone number is already registered")
 
     token = make_phone_verification_token(phone, ttl_minutes=15)
     return {

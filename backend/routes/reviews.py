@@ -78,16 +78,28 @@ async def create_review(
     if booking:
         await db.bookings.update_one({"id": body.booking_id}, {"$set": {"reviewed": True}})
 
-    # Recompute provider rating.
-    all_reviews = await db.reviews.find({"provider_id": provider_id}, {"_id": 0}).to_list(2000)
-    total = sum(r["rating"] for r in all_reviews)
-    count = len(all_reviews)
-    avg = total / count if count else 0
+    # Recompute provider rating using efficient aggregation.
+    rating_pipeline = [
+        {"$match": {"provider_id": provider_id}},
+        {"$group": {
+            "_id": None,
+            "avg_rating": {"$avg": "$rating"},
+            "count": {"$sum": 1}
+        }}
+    ]
+    rating_result = await db.reviews.aggregate(rating_pipeline).to_list(1)
+    if rating_result:
+        avg_rating = rating_result[0]["avg_rating"]
+        review_count = rating_result[0]["count"]
+    else:
+        avg_rating = 0
+        review_count = 0
+
     await db.users.update_one(
         {"id": provider_id},
         {"$set": {
-            "rating": round(avg, 2),
-            "reviews_count": count,
+            "rating": round(avg_rating, 2),
+            "reviews_count": review_count,
             # A fresh review counts as provider activity → bump for ranking recency.
             "last_activity_at": now_iso,
         }},

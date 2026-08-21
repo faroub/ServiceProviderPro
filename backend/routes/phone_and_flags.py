@@ -51,9 +51,22 @@ async def list_flags(user: Annotated[dict, Depends(current_user)]):
     require_admin(user)
     rows = await db.flags.find({"resolved": False}, {"_id": 0}).sort("flagged_at", -1).to_list(200)
     # Attach provider name/email for the queue UI.
+
+    # Get all unique provider IDs
+    provider_ids = list({r["provider_id"] for r in rows if r.get("provider_id")})
+
+    # Batch fetch all provider details in a single query
+    providers_map = {}
+    if provider_ids:
+        providers = await db.users.find(
+            {"id": {"$in": provider_ids}},
+            {"_id": 0, "id": 1, "full_name": 1, "email": 1, "category": 1, "completion_rate": 1}
+        ).to_list(None)
+        providers_map = {p["id"]: p for p in providers}
+
     out = []
     for r in rows:
-        p = await db.users.find_one({"id": r["provider_id"]}, {"_id": 0, "full_name": 1, "email": 1, "category": 1, "completion_rate": 1})
+        p = providers_map.get(r["provider_id"])
         if p:
             r.update({"full_name": p.get("full_name"), "email": p.get("email"),
                       "category": p.get("category"), "completion_rate": p.get("completion_rate")})

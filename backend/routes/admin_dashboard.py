@@ -42,7 +42,7 @@ async def admin_stats(user: Annotated[dict, Depends(current_user)]):
         {"role": Role.service_provider.value, "verification_status": "verified", "is_deleted": {"$ne": True}}
     )
     pending_verifications = await db.users.count_documents(
-        {"role": Role.service_provider.value, "verification_status": "pending"}
+        {"role": Role.service_provider.value, "verification_status": "pending", "is_deleted": {"$ne": True}}
     )
     deactivated = await db.users.count_documents(
         {
@@ -54,6 +54,7 @@ async def admin_stats(user: Annotated[dict, Depends(current_user)]):
             "is_deleted": {"$ne": True},
         }
     )
+    # Only count flags for non-deleted providers
     flagged = await db.flags.count_documents({"resolved": False})
 
     # Bookings
@@ -473,15 +474,24 @@ async def admin_subscriptions(
         {"_id": 0, "password_hash": 0},
     ).sort("created_at", -1).to_list(500)
 
+    # Get all provider IDs
+    provider_ids = [d["id"] for d in docs]
+
+    # Batch compute lifetime payment stats for all providers in a single aggregation pipeline
+    lifetime_stats = {}
+    if provider_ids:
+        pipeline = [
+            {"$match": {"provider_id": {"$in": provider_ids}, "status": "paid"}},
+            {"$group": {"_id": "$provider_id", "total": {"$sum": "$amount_dzd"}, "count": {"$sum": 1}}}
+        ]
+        agg_results = await db.subscription_payments.aggregate(pipeline).to_list(None)
+        for result in agg_results:
+            lifetime_stats[result["_id"]] = {"total": result["total"], "count": result["count"]}
+
     out = []
     for d in docs:
         sub = compute_subscription(d)
-        # Lifetime payment stats.
-        agg = await db.subscription_payments.aggregate([
-            {"$match": {"provider_id": d["id"], "status": "paid"}},
-            {"$group": {"_id": None, "total": {"$sum": "$amount_dzd"}, "count": {"$sum": 1}}},
-        ]).to_list(1)
-        lifetime = agg[0] if agg else {"total": 0, "count": 0}
+        lifetime = lifetime_stats.get(d["id"], {"total": 0, "count": 0})
 
         row = {
             "id": d["id"],

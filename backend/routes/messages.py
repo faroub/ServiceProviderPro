@@ -37,10 +37,26 @@ async def my_chats(user: Annotated[dict, Depends(current_user)]):
         {"$sort": {"last_at": -1}},
     ]
     threads = await db.messages.aggregate(pipeline).to_list(500)
+
+    # Collect all unique other IDs
+    other_ids = set()
+    for t in threads:
+        other_id = t["to_id"] if t["from_id"] == user["id"] else t["from_id"]
+        other_ids.add(other_id)
+
+    # Batch fetch all user details in a single query
+    users_map = {}
+    if other_ids:
+        users = await db.users.find(
+            {"id": {"$in": list(other_ids)}},
+            {"_id": 0, "id": 1, "full_name": 1, "avatar_url": 1, "role": 1}
+        ).to_list(None)
+        users_map = {u["id"]: u for u in users}
+
     out = []
     for t in threads:
         other_id = t["to_id"] if t["from_id"] == user["id"] else t["from_id"]
-        other = await db.users.find_one({"id": other_id}, {"_id": 0, "password_hash": 0})
+        other = users_map.get(other_id)
         if not other:
             continue
         out.append({

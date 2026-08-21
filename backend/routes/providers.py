@@ -67,7 +67,7 @@ async def list_providers(
         default=None, regex="^(auto|rating|distance|price_asc|price_desc|newest)$"
     ),
 ):
-    query = {
+    query: dict = {
         "role": Role.service_provider.value,
         "$and": [
             {"$or": [{"is_deleted": {"$exists": False}}, {"is_deleted": False}]},
@@ -90,6 +90,8 @@ async def list_providers(
     if radius_mode:
         # Cheap first-pass narrowing: providers must at least have coordinates.
         query["$and"].append({"location_lat": {"$ne": None}, "location_lng": {"$ne": None}})
+        # Assert that lat and lng are not None for type checker
+        assert lat is not None and lng is not None
 
     docs = await db.users.find(query, {"_id": 0, "password_hash": 0}).to_list(500)
 
