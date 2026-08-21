@@ -1,7 +1,8 @@
 """FastAPI dependencies — auth + role guards."""
 from typing import Annotated, Optional
+import time
 import jwt
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 
 from database import db
@@ -58,4 +59,42 @@ def require_role(role: Role):
 def require_admin(user: dict) -> dict:
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
+
+class IPRateLimiter:
+    """Simple in-memory sliding-window rate limiter by IP."""
+
+    def __init__(self, requests_limit: int, window_seconds: int):
+        self.requests_limit = requests_limit
+        self.window_seconds = window_seconds
+        # In a real multi-worker production app, you'd use Redis.
+        # This in-memory dict works for single-process uvicorn/gunicorn.
+        self.requests_history: dict[str, list[float]] = {}
+
+    async def __call__(self, request: Request):
+        # Resolve client IP (supporting reverse proxies)
+        xf = request.headers.get("x-forwarded-for")
+        if xf:
+            ip = xf.split(",")[0].strip()
+        else:
+            ip = request.client.host if request.client else "unknown"
+
+        now = time.time()
+        # Clean up old timestamps
+        history = self.requests_history.get(ip, [])
+        history = [t for t in history if now - t < self.window_seconds]
+
+        if len(history) >= self.requests_limit:
+            raise HTTPException(
+                status_code=429, detail="Too many requests. Please try again later."
+            )
+
+# Pre-defined rate limiters for auth endpoints
+login_limiter = IPRateLimiter(requests_limit=10, window_seconds=60)
+registration_limiter = IPRateLimiter(requests_limit=5, window_seconds=3600)
+otp_limiter = IPRateLimiter(requests_limit=5, window_seconds=60)
+
+
+        history.append(now)
+        self.requests_history[ip] = history
+
     return user

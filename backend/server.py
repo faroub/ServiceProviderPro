@@ -28,6 +28,8 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 
+from config import CORS_ORIGINS
+
 from database import client, db
 from routes import build_api_router
 from routes.messages import ws_chat
@@ -58,10 +60,18 @@ if os.path.isdir(_ads_dir):
 # WebSocket chat lives on the app directly (path already includes /api).
 app.add_api_websocket_route("/api/ws/chat", ws_chat)
 
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

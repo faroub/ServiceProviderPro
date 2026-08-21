@@ -1,6 +1,8 @@
 """Admin dashboard endpoints: stats, user management, bookings monitor,
 revenue view, push broadcast, and CSV exports.
 """
+import re
+
 import csv
 import io
 from datetime import datetime, timezone, timedelta
@@ -146,10 +148,11 @@ async def admin_search_users(
     if q:
         # Case-insensitive prefix search on name/email/phone.
         safe = q.strip()
+        escaped_safe = re.escape(safe)
         filt["$or"] = [
-            {"full_name": {"$regex": safe, "$options": "i"}},
-            {"email": {"$regex": safe, "$options": "i"}},
-            {"phone": {"$regex": safe, "$options": "i"}},
+            {"full_name": {"$regex": escaped_safe, "$options": "i"}},
+            {"email": {"$regex": escaped_safe, "$options": "i"}},
+            {"phone": {"$regex": escaped_safe, "$options": "i"}},
         ]
     if role in {"client", "service_provider"}:
         filt["role"] = role

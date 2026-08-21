@@ -7,7 +7,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException
 
 from database import db
-from deps import current_user
+from deps import current_user, login_limiter, registration_limiter
 from phone import normalize_dz_phone
 from reference_data import WILAYAS
 from schemas import LoginIn, RegisterIn, Role, TokenOut
@@ -25,7 +25,7 @@ router = APIRouter(tags=["auth"])
 _VALID_WILAYA_CODES = {w["code"] for w in WILAYAS}
 
 
-@router.post("/auth/register", response_model=TokenOut, status_code=201)
+@router.post("/auth/register", response_model=TokenOut, status_code=201, dependencies=[Depends(registration_limiter)])
 async def register(body: RegisterIn):
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
@@ -126,7 +126,7 @@ async def register(body: RegisterIn):
     return {"access_token": token, "token_type": "bearer", "user": serialize_user(doc)}
 
 
-@router.post("/auth/login", response_model=TokenOut)
+@router.post("/auth/login", response_model=TokenOut, dependencies=[Depends(login_limiter)])
 async def login(body: LoginIn):
     user = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
     if not user or not verify_password(body.password, user["password_hash"]):

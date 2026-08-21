@@ -2,6 +2,7 @@
 import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -79,11 +80,12 @@ async def list_providers(
     if wilaya:
         query["$and"].append({"$or": [{"wilaya_code": wilaya}, {"cross_wilaya": True}]})
     if search:
+        escaped_search = re.escape(search)
         query["$and"].append({"$or": [
-            {"full_name": {"$regex": search, "$options": "i"}},
-            {"bio": {"$regex": search, "$options": "i"}},
-            {"city": {"$regex": search, "$options": "i"}},
-            {"baladiya": {"$regex": search, "$options": "i"}},
+            {"full_name": {"$regex": escaped_search, "$options": "i"}},
+            {"bio": {"$regex": escaped_search, "$options": "i"}},
+            {"city": {"$regex": escaped_search, "$options": "i"}},
+            {"baladiya": {"$regex": escaped_search, "$options": "i"}},
         ]})
 
     radius_mode = lat is not None and lng is not None and radius_km is not None

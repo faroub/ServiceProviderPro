@@ -8,7 +8,7 @@ import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 
 from database import db
-from deps import current_user
+from deps import current_user, otp_limiter
 from phone import normalize_dz_phone, send_otp_code
 from schemas import (
     OtpRequestIn,
@@ -22,7 +22,7 @@ from subscription import enforce_lifecycle, serialize_user
 router = APIRouter(tags=["otp"])
 
 
-@router.post("/auth/otp/request")
+@router.post("/auth/otp/request", dependencies=[Depends(otp_limiter)])
 async def request_otp(body: OtpRequestIn):
     phone = normalize_dz_phone(body.phone)
     now = datetime.now(timezone.utc)
@@ -69,6 +69,7 @@ async def request_otp(body: OtpRequestIn):
             "code_hash": code_hash,
             "created_at": now.isoformat(),
             "expires_at": (now + timedelta(minutes=5)).isoformat(),
+            "attempts": 0,
         },
         upsert=True,
     )
@@ -85,7 +86,7 @@ async def request_otp(body: OtpRequestIn):
     return {"message": "If the number is valid, a verification code was sent", "expires_in": 300}
 
 
-@router.post("/auth/otp/verify")
+@router.post("/auth/otp/verify", dependencies=[Depends(otp_limiter)])
 async def verify_otp(body: OtpVerifyIn):
     phone = normalize_dz_phone(body.phone)
     now = datetime.now(timezone.utc)
@@ -98,7 +99,12 @@ async def verify_otp(body: OtpVerifyIn):
     if not expires_at or expires_at <= now:
         raise HTTPException(status_code=401, detail="Invalid or expired verification code")
     if not bcrypt.checkpw(body.code.encode(), challenge["code_hash"].encode()):
-        raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+        attempts = challenge.get("attempts", 0) + 1
+        if attempts >= 5:
+            await db.otp_challenges.delete_one({"phone_e164": phone})
+            raise HTTPException(status_code=401, detail="Too many failed attempts. Please request a new code.")
+        await db.otp_challenges.update_one({"phone_e164": phone}, {"$set": {"attempts": attempts}})
+        raise HTTPException(status_code=401, detail=f"Invalid code. {5 - attempts} attempts remaining.")
 
     # Single-use race protection
     deleted = await db.otp_challenges.delete_one({"phone_e164": phone})
@@ -175,7 +181,7 @@ async def verify_otp(body: OtpVerifyIn):
 
 
 
-@router.post("/auth/verify-my-phone")
+@router.post("/auth/verify-my-phone", dependencies=[Depends(otp_limiter)])
 async def verify_my_phone(
     body: VerifyMyPhoneIn,
     user: Annotated[dict, Depends(current_user)],
@@ -205,7 +211,12 @@ async def verify_my_phone(
     if not expires_at or expires_at <= now:
         raise HTTPException(status_code=401, detail="Invalid or expired verification code")
     if not bcrypt.checkpw(body.code.encode(), challenge["code_hash"].encode()):
-        raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+        attempts = challenge.get("attempts", 0) + 1
+        if attempts >= 5:
+            await db.otp_challenges.delete_one({"phone_e164": phone})
+            raise HTTPException(status_code=401, detail="Too many failed attempts. Please request a new code.")
+        await db.otp_challenges.update_one({"phone_e164": phone}, {"$set": {"attempts": attempts}})
+        raise HTTPException(status_code=401, detail=f"Invalid code. {5 - attempts} attempts remaining.")
 
     # Single-use.
     deleted = await db.otp_challenges.delete_one({"phone_e164": phone})
@@ -225,7 +236,7 @@ async def verify_my_phone(
 
 
 
-@router.post("/auth/otp/verify-for-registration")
+@router.post("/auth/otp/verify-for-registration", dependencies=[Depends(otp_limiter)])
 async def verify_otp_for_registration(body: OtpVerifyForRegistrationIn):
     """Public OTP verify used by the multi-step provider registration flow.
 
@@ -246,7 +257,12 @@ async def verify_otp_for_registration(body: OtpVerifyForRegistrationIn):
     if not expires_at or expires_at <= now:
         raise HTTPException(status_code=401, detail="Invalid or expired verification code")
     if not bcrypt.checkpw(body.code.encode(), challenge["code_hash"].encode()):
-        raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+        attempts = challenge.get("attempts", 0) + 1
+        if attempts >= 5:
+            await db.otp_challenges.delete_one({"phone_e164": phone})
+            raise HTTPException(status_code=401, detail="Too many failed attempts. Please request a new code.")
+        await db.otp_challenges.update_one({"phone_e164": phone}, {"$set": {"attempts": attempts}})
+        raise HTTPException(status_code=401, detail=f"Invalid code. {5 - attempts} attempts remaining.")
 
     # Single-use — burn the challenge.
     deleted = await db.otp_challenges.delete_one({"phone_e164": phone})
