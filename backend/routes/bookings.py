@@ -274,8 +274,8 @@ async def _recompute_and_maybe_flag(provider_id: str):
             if ca_dt and ca_dt < threshold:
                 consecutive_stale += 1
             else:
-                # Reset counter when we find a non-stale booking (streak is broken)
-                consecutive_stale = 0
+                # Found a non-stale booking - consecutive streak from newest is broken
+                break
 
     should_flag = (
         consecutive_stale >= FLAG_CONSECUTIVE_NO_COMPLETE

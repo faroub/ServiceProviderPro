@@ -55,7 +55,16 @@ async def admin_stats(user: Annotated[dict, Depends(current_user)]):
         }
     )
     # Only count flags for non-deleted providers
-    flagged = await db.flags.count_documents({"resolved": False})
+    provider_ids = [d["id"] async for d in db.users.find(
+        {"role": Role.service_provider.value, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1}
+    ).to_list(None)]
+    if provider_ids:
+        flagged = await db.flags.count_documents(
+            {"resolved": False, "provider_id": {"$in": provider_ids}}
+        )
+    else:
+        flagged = 0
 
     # Bookings
     total_bookings = await db.bookings.count_documents({})
