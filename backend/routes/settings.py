@@ -38,6 +38,14 @@ def _base_url_for(mode: str) -> str:
     return "https://pay.chargily.net/api/v2" if mode == "live" else "https://pay.chargily.net/test/api/v2"
 
 
+def _mask(v: str) -> str:
+    if not v:
+        return ""
+    if len(v) <= 12:
+        return "•" * len(v)
+    return f"{v[:8]}•••{v[-4:]}"
+
+
 async def get_effective_settings() -> dict:
     """Merged env + DB settings. Always returns a full payload with sensible
     defaults so callers never have to guess."""
@@ -150,14 +158,6 @@ async def get_effective_settings() -> dict:
             "pricing_period_ar": site_doc.get("pricing_period_ar") or "",
         },
     }
-
-
-def _mask(v: str) -> str:
-    if not v:
-        return ""
-    if len(v) <= 12:
-        return "•" * len(v)
-    return f"{v[:8]}•••{v[-4:]}"
 
 
 # ---------- Public admin surface ----------
