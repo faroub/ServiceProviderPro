@@ -49,6 +49,20 @@ async def create_review(
         raise HTTPException(status_code=400, detail="booking_id or provider_id required")
 
     review_id = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Sanitize photos: strict data-URI cap so a malicious client can't push
+    # a 20 MB blob per photo. ~350 KB per photo is well above what our client
+    # compressor produces (~200 KB target).
+    raw_photos = (body.photos or [])[:3]
+    photos: list[str] = []
+    for p in raw_photos:
+        if not isinstance(p, str) or not p.startswith("data:image/"):
+            continue
+        if len(p) > 500_000:  # ~350 KB base64 payload cap
+            raise HTTPException(status_code=413, detail="Photo too large — compress before upload")
+        photos.append(p)
+
     doc = {
         "id": review_id,
         "booking_id": body.booking_id,
@@ -57,20 +71,38 @@ async def create_review(
         "client_name": user["full_name"],
         "rating": body.rating,
         "comment": body.comment,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "photos": photos,
+        "created_at": now_iso,
     }
     await db.reviews.insert_one(doc)
     if booking:
         await db.bookings.update_one({"id": body.booking_id}, {"$set": {"reviewed": True}})
 
-    # Recompute provider rating.
-    all_reviews = await db.reviews.find({"provider_id": provider_id}, {"_id": 0}).to_list(2000)
-    total = sum(r["rating"] for r in all_reviews)
-    count = len(all_reviews)
-    avg = total / count if count else 0
+    # Recompute provider rating using efficient aggregation.
+    rating_pipeline = [
+        {"$match": {"provider_id": provider_id}},
+        {"$group": {
+            "_id": None,
+            "avg_rating": {"$avg": "$rating"},
+            "count": {"$sum": 1}
+        }}
+    ]
+    rating_result = await db.reviews.aggregate(rating_pipeline).to_list(1)
+    if rating_result:
+        avg_rating = rating_result[0]["avg_rating"]
+        review_count = rating_result[0]["count"]
+    else:
+        avg_rating = 0
+        review_count = 0
+
     await db.users.update_one(
         {"id": provider_id},
-        {"$set": {"rating": round(avg, 2), "reviews_count": count}},
+        {"$set": {
+            "rating": round(avg_rating, 2),
+            "reviews_count": review_count,
+            # A fresh review counts as provider activity → bump for ranking recency.
+            "last_activity_at": now_iso,
+        }},
     )
     doc.pop("_id", None)
 

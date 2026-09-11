@@ -3,6 +3,11 @@ import { clearToken, readToken, saveToken } from "./authStorage";
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
 export const API_URL = `${BASE}/api`;
 
+// Read the current auth token (for callers that need to authenticate raw fetches, e.g. file downloads).
+export async function getAuthToken(): Promise<string | null> {
+  return readToken();
+}
+
 export type PortfolioItem = {
   url: string;
   caption?: string | null;
@@ -50,7 +55,19 @@ export const api = {
   },
 
   categories: () => request("/categories", { auth: false }),
-  providers: (params?: { category?: string; search?: string; wilaya?: string; lat?: number; lng?: number; radius_km?: number }) => {
+  providers: (params?: {
+    category?: string;
+    search?: string;
+    wilaya?: string;
+    lat?: number;
+    lng?: number;
+    radius_km?: number;
+    min_price?: number;
+    max_price?: number;
+    verified_only?: boolean;
+    new_only?: boolean;
+    sort?: "auto" | "rating" | "distance" | "price_asc" | "price_desc" | "newest";
+  }) => {
     const q = new URLSearchParams();
     if (params?.category) q.set("category", params.category);
     if (params?.search) q.set("search", params.search);
@@ -60,6 +77,11 @@ export const api = {
       q.set("lng", String(params.lng));
       q.set("radius_km", String(params.radius_km));
     }
+    if (params?.min_price != null) q.set("min_price", String(params.min_price));
+    if (params?.max_price != null) q.set("max_price", String(params.max_price));
+    if (params?.verified_only) q.set("verified_only", "true");
+    if (params?.new_only) q.set("new_only", "true");
+    if (params?.sort && params.sort !== "auto") q.set("sort", params.sort);
     const qs = q.toString();
     return request(`/providers${qs ? `?${qs}` : ""}`, { auth: false });
   },
@@ -108,9 +130,119 @@ export const api = {
   adminClearFlag: (providerId: string) =>
     request(`/admin/flags/${encodeURIComponent(providerId)}/clear`, { method: "POST" }),
 
+  // Admin dashboard
+  adminStats: () => request<any>("/admin/stats"),
+  adminSearchUsers: (params?: { q?: string; role?: string; wilaya?: string; status?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.role) qs.set("role", params.role);
+    if (params?.wilaya) qs.set("wilaya", params.wilaya);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    const s = qs.toString();
+    return request<any[]>(`/admin/users${s ? `?${s}` : ""}`);
+  },
+  adminDeactivateUser: (id: string) =>
+    request(`/admin/users/${encodeURIComponent(id)}/deactivate`, { method: "POST" }),
+  adminReactivateUser: (id: string) =>
+    request(`/admin/users/${encodeURIComponent(id)}/reactivate`, { method: "POST" }),
+  adminForceVerify: (id: string, verified = true) =>
+    request(`/admin/users/${encodeURIComponent(id)}/force-verify`, {
+      method: "POST",
+      body: JSON.stringify({ verified }),
+    }),
+  adminDeleteUser: (id: string) =>
+    request(`/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  adminBookings: (status?: string, limit = 50) => {
+    const qs = new URLSearchParams();
+    if (status) qs.set("status", status);
+    qs.set("limit", String(limit));
+    return request<any[]>(`/admin/bookings?${qs.toString()}`);
+  },
+  adminRevenue: (months = 6) =>
+    request<any[]>(`/admin/revenue?months=${months}`),
+  adminBroadcast: (payload: { title: string; message: string; audience: string; wilaya_code?: string; action_url?: string }) =>
+    request("/admin/broadcast", { method: "POST", body: JSON.stringify(payload) }),
+  adminExportUrl: (kind: "users" | "providers" | "bookings") => `${API_URL}/admin/export/${kind}`,
+
+  // Admin categories
+  adminListCategories: () => request<any[]>("/admin/categories"),
+  adminCreateCategory: (payload: any) =>
+    request("/admin/categories", { method: "POST", body: JSON.stringify(payload) }),
+  adminUpdateCategory: (id: string, patch: any) =>
+    request(`/admin/categories/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  adminDeleteCategory: (id: string) =>
+    request(`/admin/categories/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  adminReorderCategories: (order: string[]) =>
+    request<any[]>("/admin/categories/reorder", { method: "POST", body: JSON.stringify({ order }) }),
+
+  // Ads (public)
+  listAds: () => request<any[]>("/ads", { auth: false }),
+  adImpression: (id: string) =>
+    fetch(`${API_URL}/ads/${encodeURIComponent(id)}/impression`, { method: "POST" }).catch(() => {}),
+  adClick: (id: string) =>
+    fetch(`${API_URL}/ads/${encodeURIComponent(id)}/click`, { method: "POST" }).catch(() => {}),
+  // Ads (admin)
+  adminListAds: () => request<any[]>("/admin/ads"),
+  adminCreateAd: (payload: any) =>
+    request("/admin/ads", { method: "POST", body: JSON.stringify(payload) }),
+  adminUpdateAd: (id: string, patch: any) =>
+    request(`/admin/ads/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  adminDeleteAd: (id: string) =>
+    request(`/admin/ads/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  adminReorderAds: (order: string[]) =>
+    request<any[]>("/admin/ads/reorder", { method: "POST", body: JSON.stringify({ order }) }),
+
+  // Admin categories import/export
+  adminExportCategoriesUrl: () => `${API_URL}/admin/categories/export`,
+  adminImportCategories: (payload: { categories: any[]; mode?: "merge" | "replace" }) =>
+    request("/admin/categories/import", { method: "POST", body: JSON.stringify(payload) }),
+
+  // Provider self-analytics
+  providerAnalytics: (weeks = 12) => request<any>(`/providers/me/analytics?weeks=${weeks}`),
+
+  // Admin subscriptions
+  adminSubscriptions: (statusFilter?: string, limit = 100) => {
+    const qs = new URLSearchParams();
+    if (statusFilter) qs.set("status", statusFilter);
+    qs.set("limit", String(limit));
+    return request<any[]>(`/admin/subscriptions?${qs.toString()}`);
+  },
+  adminProviderPayments: (providerId: string) =>
+    request<any[]>(`/admin/subscriptions/${encodeURIComponent(providerId)}/payments`),
+  adminMarkPaid: (providerId: string, payload: { amount_dzd?: number; note?: string }) =>
+    request(`/admin/subscriptions/${encodeURIComponent(providerId)}/mark-paid`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  adminRemindDue: (payload: { title: string; message: string }) =>
+    request<{ sent: number; recipients: number }>("/admin/subscriptions/remind-due", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  adminSubscriptionRevenueUrl: () => `${API_URL}/admin/export/subscription_revenue`,
+  adminSubscriptionsRevenueChart: (months = 12) =>
+    request<{ month: string; revenue_dzd: number; payments: number }[]>(`/admin/subscriptions/revenue?months=${months}`),
+
+  // Platform settings
+  adminGetSettings: () => request<any>("/admin/settings"),
+  adminUpdateSettings: (patch: any) =>
+    request<any>("/admin/settings", { method: "PATCH", body: JSON.stringify(patch) }),
+  adminChargilyHealth: () => request<any>("/admin/settings/chargily-health"),
+  adminTestSms: (phone: string) =>
+    request<any>("/admin/settings/sms/test", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+
   // OTP auth
   otpRequest: (phone: string) =>
     request("/auth/otp/request", { method: "POST", body: JSON.stringify({ phone }), auth: false }),
+  otpVerifyForRegistration: (phone: string, code: string) =>
+    request<{ phone_verified: boolean; phone_e164: string; phone_verification_token: string; expires_in: number }>(
+      "/auth/otp/verify-for-registration",
+      { method: "POST", body: JSON.stringify({ phone, code }), auth: false },
+    ),
   otpVerify: async (phone: string, code: string, role: "client" | "service_provider") => {
     const data: any = await request("/auth/otp/verify", {
       method: "POST",

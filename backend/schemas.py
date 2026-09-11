@@ -42,6 +42,17 @@ class RegisterIn(BaseModel):
     wilaya_code: Optional[str] = None
     baladiya: Optional[str] = None
     cross_wilaya: bool = False
+    # Signed phone-verification token issued by /auth/otp/verify-for-registration.
+    # Required for provider role; ignored for clients.
+    phone_verification_token: Optional[str] = None
+
+
+class OtpVerifyForRegistrationIn(BaseModel):
+    """Verifies an OTP for a NOT-YET-REGISTERED phone number and returns a
+    short-lived signed token (`phone_verification_token`) that must be sent
+    back to `POST /auth/register` for providers."""
+    phone: str = Field(min_length=9, max_length=20)
+    code: str = Field(pattern=r"^\d{6}$")
 
 
 class LoginIn(BaseModel):
@@ -150,6 +161,9 @@ class ReviewCreate(BaseModel):
     provider_id: Optional[str] = None
     rating: int = Field(ge=1, le=5)
     comment: str
+    # Optional attached photos as data URIs (base64). Cap at 3 client-side; the
+    # server also validates and rejects the payload if it exceeds `max_len` chars.
+    photos: List[str] = Field(default_factory=list, max_length=3)
 
 
 # ---------- Schedule / chat ----------

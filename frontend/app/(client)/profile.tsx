@@ -17,6 +17,7 @@ import { useAuth } from "@/src/auth";
 import { theme } from "@/src/theme";
 import { useT } from "@/src/language";
 import { LanguageSwitcher } from "@/src/LanguageSwitcher";
+import { SocialLinksRow } from "@/src/SocialLinksRow";
 import { api } from "@/src/api";
 import { VerificationCard } from "@/src/VerificationCard";
 import { PhoneVerifyBanner } from "@/src/PhoneVerifyBanner";
@@ -199,32 +200,18 @@ export default function Profile() {
 
         {/* ============ Admin (admin users only) ============ */}
         {user.is_admin && (
-          <>
-            <Pressable
-              testID="admin-panel-link"
-              style={styles.dangerCardActive}
-              onPress={() => router.push("/admin/verification")}
-            >
-              <Ionicons name="shield-checkmark" size={22} color={theme.colors.brand} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.dangerTitle}>{t("admin.title")}</Text>
-                <Text style={styles.dangerSub}>{t("admin.empty")}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
-            </Pressable>
-            <Pressable
-              testID="admin-flags-link"
-              style={styles.dangerCardActive}
-              onPress={() => router.push("/admin/flags")}
-            >
-              <Ionicons name="flag" size={22} color={theme.colors.error} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.dangerTitle}>{t("flags.section")}</Text>
-                <Text style={styles.dangerSub}>{t("flags.sectionSub")}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
-            </Pressable>
-          </>
+          <Pressable
+            testID="admin-panel-link"
+            style={styles.dangerCardActive}
+            onPress={() => router.push("/admin")}
+          >
+            <Ionicons name="shield-checkmark" size={22} color={theme.colors.brand} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.dangerTitle}>{t("admin.hub")}</Text>
+              <Text style={styles.dangerSub}>{t("admin.hubSub")}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
+          </Pressable>
         )}
 
         {/* ============ Verification (providers only) ============ */}
@@ -362,6 +349,8 @@ export default function Profile() {
           <Ionicons name="log-out-outline" size={20} color={theme.colors.error} />
           <Text style={styles.logoutText}>{t("profile.signOut")}</Text>
         </Pressable>
+
+        <SocialLinksRow color={theme.colors.onSurfaceSecondary} testID="profile-social-row" />
       </ScrollView>
 
       {/* Toast */}

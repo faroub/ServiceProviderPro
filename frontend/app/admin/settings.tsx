@@ -1,0 +1,1419 @@
+import React, { useCallback, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  TextInput,
+  Switch,
+  Alert,
+  Platform,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect, useRouter } from "expo-router";
+import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
+import { theme } from "@/src/theme";
+import { useT } from "@/src/language";
+
+type SmsSection = {
+  provider: "mock" | "twilio" | "http";
+  healthy: boolean;
+  detail: string;
+  message_template: string;
+  twilio_from: string;
+  twilio_account_sid_masked: string;
+  http_url: string;
+  http_method: "GET" | "POST" | "PUT";
+  http_body_template: string;
+  http_content_type: string;
+  http_header_keys: string[];
+};
+
+type Settings = {
+  subscription_price_dzd: number;
+  trial_days: number;
+  payments_enabled: boolean;
+  chargily_mode: "test" | "live";
+  chargily_base_url: string;
+  chargily_secret_key_source: "env" | "db" | "none";
+  chargily_webhook_secret_source: "env" | "db" | "none";
+  chargily_secret_key_masked: string;
+  sms?: SmsSection;
+  social?: {
+    facebook_url: string;
+    instagram_url: string;
+    tiktok_url: string;
+  };
+  site?: {
+    hero_title_en: string;
+    hero_title_fr: string;
+    hero_title_ar: string;
+    hero_sub_en: string;
+    hero_sub_fr: string;
+    hero_sub_ar: string;
+    contact_email: string;
+    contact_phone: string;
+    contact_whatsapp: string;
+  };
+};
+
+type Health = Settings & { healthy: boolean; detail: string; http_status?: number };
+
+export default function AdminSettings() {
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
+  const { isRTL, t } = useT();
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [health_busy, setHealthBusy] = useState(false);
+
+  // Editable local state
+  const [price, setPrice] = useState("1000");
+  const [trial, setTrial] = useState("90");
+  const [mode, setMode] = useState<"test" | "live">("test");
+  const [payEnabled, setPayEnabled] = useState(true);
+  const [secretOverride, setSecretOverride] = useState("");
+  const [showSecret, setShowSecret] = useState(false);
+
+  // SMS local state
+  const [smsProvider, setSmsProvider] = useState<"mock" | "twilio" | "http">("mock");
+  const [twilioSid, setTwilioSid] = useState("");
+  const [twilioToken, setTwilioToken] = useState("");
+  const [twilioFrom, setTwilioFrom] = useState("");
+  const [showTwilioToken, setShowTwilioToken] = useState(false);
+  const [httpUrl, setHttpUrl] = useState("");
+  const [httpMethod, setHttpMethod] = useState<"GET" | "POST" | "PUT">("POST");
+  const [httpContentType, setHttpContentType] = useState("application/json");
+  const [httpBodyTpl, setHttpBodyTpl] = useState("");
+  const [httpHeadersRaw, setHttpHeadersRaw] = useState("");
+  const [msgTemplate, setMsgTemplate] = useState("");
+  const [smsTestPhone, setSmsTestPhone] = useState("");
+  const [smsTestBusy, setSmsTestBusy] = useState(false);
+
+  // Social media local state
+  const [facebookUrl, setFacebookUrl] = useState("");
+  const [instagramUrl, setInstagramUrl] = useState("");
+  const [tiktokUrl, setTiktokUrl] = useState("");
+
+  // Marketing site content
+  const [heroTitleEn, setHeroTitleEn] = useState("");
+  const [heroTitleFr, setHeroTitleFr] = useState("");
+  const [heroTitleAr, setHeroTitleAr] = useState("");
+  const [heroSubEn, setHeroSubEn] = useState("");
+  const [heroSubFr, setHeroSubFr] = useState("");
+  const [heroSubAr, setHeroSubAr] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactWhatsapp, setContactWhatsapp] = useState("");
+  // Section-visibility toggles (default: everything visible)
+  const [showFeatures, setShowFeatures] = useState(true);
+  const [showStats, setShowStats] = useState(true);
+  const [showTestimonials, setShowTestimonials] = useState(true);
+  const [showFinalCta, setShowFinalCta] = useState(true);
+  // Feature blurbs — JSON textarea for flexibility (up to 6 items).
+  const [featuresJson, setFeaturesJson] = useState("");
+  const [featuresJsonError, setFeaturesJsonError] = useState<string | null>(null);
+  // Testimonials — structured list editor
+  type Testimonial = { name: string; role: string; quote_en: string; quote_fr: string; quote_ar: string; avatar_url?: string };
+  const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  // Footer tagline + advertise CTA overrides (per language)
+  const [footerTaglineEn, setFooterTaglineEn] = useState("");
+  const [footerTaglineFr, setFooterTaglineFr] = useState("");
+  const [footerTaglineAr, setFooterTaglineAr] = useState("");
+  const [advertiseH2En, setAdvertiseH2En] = useState("");
+  const [advertiseH2Fr, setAdvertiseH2Fr] = useState("");
+  const [advertiseH2Ar, setAdvertiseH2Ar] = useState("");
+  const [advertiseBodyEn, setAdvertiseBodyEn] = useState("");
+  const [advertiseBodyFr, setAdvertiseBodyFr] = useState("");
+  const [advertiseBodyAr, setAdvertiseBodyAr] = useState("");
+  // Nav labels (all pages) + pricing block (for-providers.html)
+  const [navHowEn, setNavHowEn] = useState("");
+  const [navHowFr, setNavHowFr] = useState("");
+  const [navHowAr, setNavHowAr] = useState("");
+  const [navProvidersEn, setNavProvidersEn] = useState("");
+  const [navProvidersFr, setNavProvidersFr] = useState("");
+  const [navProvidersAr, setNavProvidersAr] = useState("");
+  const [navContactEn, setNavContactEn] = useState("");
+  const [navContactFr, setNavContactFr] = useState("");
+  const [navContactAr, setNavContactAr] = useState("");
+  const [navOpenEn, setNavOpenEn] = useState("");
+  const [navOpenFr, setNavOpenFr] = useState("");
+  const [navOpenAr, setNavOpenAr] = useState("");
+  const [pricingH2En, setPricingH2En] = useState("");
+  const [pricingH2Fr, setPricingH2Fr] = useState("");
+  const [pricingH2Ar, setPricingH2Ar] = useState("");
+  const [pricingBodyEn, setPricingBodyEn] = useState("");
+  const [pricingBodyFr, setPricingBodyFr] = useState("");
+  const [pricingBodyAr, setPricingBodyAr] = useState("");
+  const [pricingAmount, setPricingAmount] = useState("");
+  const [pricingPeriodEn, setPricingPeriodEn] = useState("");
+  const [pricingPeriodFr, setPricingPeriodFr] = useState("");
+  const [pricingPeriodAr, setPricingPeriodAr] = useState("");
+
+  const load = useCallback(async () => {
+    if (!user?.is_admin) return;
+    setLoading(true);
+    try {
+      const s: any = await api.adminGetSettings();
+      setSettings(s);
+      setPrice(String(s.subscription_price_dzd || 1000));
+      setTrial(String(s.trial_days || 90));
+      setMode(s.chargily_mode || "test");
+      setPayEnabled(!!s.payments_enabled);
+      if (s.sms) {
+        setSmsProvider(s.sms.provider || "mock");
+        setTwilioFrom(s.sms.twilio_from || "");
+        setTwilioSid(""); // never returned by backend — user must re-enter to change
+        setTwilioToken("");
+        setHttpUrl(s.sms.http_url || "");
+        setHttpMethod((s.sms.http_method as any) || "POST");
+        setHttpContentType(s.sms.http_content_type || "application/json");
+        setHttpBodyTpl(s.sms.http_body_template || "");
+        setMsgTemplate(s.sms.message_template || "");
+      }
+      if (s.social) {
+        setFacebookUrl(s.social.facebook_url || "");
+        setInstagramUrl(s.social.instagram_url || "");
+        setTiktokUrl(s.social.tiktok_url || "");
+      }
+      if (s.site) {
+        setHeroTitleEn(s.site.hero_title_en || "");
+        setHeroTitleFr(s.site.hero_title_fr || "");
+        setHeroTitleAr(s.site.hero_title_ar || "");
+        setHeroSubEn(s.site.hero_sub_en || "");
+        setHeroSubFr(s.site.hero_sub_fr || "");
+        setHeroSubAr(s.site.hero_sub_ar || "");
+        setContactEmail(s.site.contact_email || "");
+        setContactPhone(s.site.contact_phone || "");
+        setContactWhatsapp(s.site.contact_whatsapp || "");
+        setShowFeatures(s.site.show_features !== false);
+        setShowStats(s.site.show_stats !== false);
+        setShowTestimonials(s.site.show_testimonials !== false);
+        setShowFinalCta(s.site.show_final_cta !== false);
+        setFeaturesJson(
+          Array.isArray(s.site.features) && s.site.features.length > 0
+            ? JSON.stringify(s.site.features, null, 2)
+            : ""
+        );
+        setTestimonials(Array.isArray(s.site.testimonials) ? s.site.testimonials : []);
+        setFooterTaglineEn(s.site.footer_tagline_en || "");
+        setFooterTaglineFr(s.site.footer_tagline_fr || "");
+        setFooterTaglineAr(s.site.footer_tagline_ar || "");
+        setAdvertiseH2En(s.site.advertise_h2_en || "");
+        setAdvertiseH2Fr(s.site.advertise_h2_fr || "");
+        setAdvertiseH2Ar(s.site.advertise_h2_ar || "");
+        setAdvertiseBodyEn(s.site.advertise_body_en || "");
+        setAdvertiseBodyFr(s.site.advertise_body_fr || "");
+        setAdvertiseBodyAr(s.site.advertise_body_ar || "");
+        setNavHowEn(s.site.nav_how_en || "");
+        setNavHowFr(s.site.nav_how_fr || "");
+        setNavHowAr(s.site.nav_how_ar || "");
+        setNavProvidersEn(s.site.nav_providers_en || "");
+        setNavProvidersFr(s.site.nav_providers_fr || "");
+        setNavProvidersAr(s.site.nav_providers_ar || "");
+        setNavContactEn(s.site.nav_contact_en || "");
+        setNavContactFr(s.site.nav_contact_fr || "");
+        setNavContactAr(s.site.nav_contact_ar || "");
+        setNavOpenEn(s.site.nav_open_en || "");
+        setNavOpenFr(s.site.nav_open_fr || "");
+        setNavOpenAr(s.site.nav_open_ar || "");
+        setPricingH2En(s.site.pricing_h2_en || "");
+        setPricingH2Fr(s.site.pricing_h2_fr || "");
+        setPricingH2Ar(s.site.pricing_h2_ar || "");
+        setPricingBodyEn(s.site.pricing_body_en || "");
+        setPricingBodyFr(s.site.pricing_body_fr || "");
+        setPricingBodyAr(s.site.pricing_body_ar || "");
+        setPricingAmount(s.site.pricing_amount || "");
+        setPricingPeriodEn(s.site.pricing_period_en || "");
+        setPricingPeriodFr(s.site.pricing_period_fr || "");
+        setPricingPeriodAr(s.site.pricing_period_ar || "");
+      }
+    } catch {
+      setSettings(null);
+    }
+    setLoading(false);
+  }, [user?.is_admin]);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  if (!authLoading && !user?.is_admin) {
+    return (
+      <SafeAreaView style={styles.root} edges={["top"]}>
+        <View style={styles.center}>
+          <Ionicons name="lock-closed" size={40} color={theme.colors.muted} />
+          <Text style={styles.emptyText}>{t("admin.forbidden")}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const save = async () => {
+    if (!settings) return;
+    setBusy(true);
+    try {
+      const patch: any = {
+        subscription_price_dzd: Number(price) || 1000,
+        trial_days: Number(trial) || 90,
+        chargily_mode: mode,
+        payments_enabled: payEnabled,
+      };
+      // Only send secret override if the field is not empty and not the placeholder mask.
+      if (secretOverride.trim().length > 0) {
+        patch.chargily_secret_key_override = secretOverride.trim();
+      }
+      // SMS block. Empty strings clear a stored value on the server; unchanged
+      // secret fields (Twilio SID / token) are only sent when the admin actually
+      // typed something so we don't accidentally overwrite existing keys with blanks.
+      const smsPatch: any = { provider: smsProvider, message_template: msgTemplate };
+      if (twilioSid.trim().length > 0) smsPatch.twilio_account_sid = twilioSid.trim();
+      if (twilioToken.trim().length > 0) smsPatch.twilio_auth_token = twilioToken.trim();
+      smsPatch.twilio_from = twilioFrom.trim();
+      smsPatch.http_url = httpUrl.trim();
+      smsPatch.http_method = httpMethod;
+      smsPatch.http_content_type = httpContentType.trim() || "application/json";
+      smsPatch.http_body_template = httpBodyTpl;
+      // Parse "Header-Name: value" lines into an object.
+      if (httpHeadersRaw.trim().length > 0) {
+        const obj: Record<string, string> = {};
+        httpHeadersRaw.split(/\n+/).forEach((line) => {
+          const m = line.match(/^([^:]+):\s*(.+)$/);
+          if (m) obj[m[1].trim()] = m[2].trim();
+        });
+        smsPatch.http_headers = obj;
+      }
+      patch.sms = smsPatch;
+
+      // Social media links block
+      patch.social = {
+        facebook_url: facebookUrl.trim(),
+        instagram_url: instagramUrl.trim(),
+        tiktok_url: tiktokUrl.trim(),
+      };
+
+      // Parse features JSON if provided. Silent-fail keeps the save flow safe;
+      // we surface the error in the UI separately.
+      let featuresArr: any[] = [];
+      setFeaturesJsonError(null);
+      if (featuresJson.trim()) {
+        try {
+          const parsed = JSON.parse(featuresJson);
+          if (Array.isArray(parsed)) {
+            featuresArr = parsed.slice(0, 6);
+          } else {
+            setFeaturesJsonError("Features must be a JSON array — see the placeholder for the shape.");
+          }
+        } catch (e: any) {
+          setFeaturesJsonError("Invalid JSON: " + (e?.message || "parse failed"));
+          Alert.alert("Features JSON invalid", "Please fix the JSON before saving.");
+          setBusy(false);
+          return;
+        }
+      }
+
+      // Marketing site content block
+      patch.site = {
+        hero_title_en: heroTitleEn.trim(),
+        hero_title_fr: heroTitleFr.trim(),
+        hero_title_ar: heroTitleAr.trim(),
+        hero_sub_en: heroSubEn.trim(),
+        hero_sub_fr: heroSubFr.trim(),
+        hero_sub_ar: heroSubAr.trim(),
+        contact_email: contactEmail.trim(),
+        contact_phone: contactPhone.trim(),
+        contact_whatsapp: contactWhatsapp.trim(),
+        show_features: showFeatures,
+        show_stats: showStats,
+        show_testimonials: showTestimonials,
+        show_final_cta: showFinalCta,
+        features: featuresArr,
+        testimonials: testimonials.filter((t) => (t.quote_en || t.quote_fr || t.quote_ar || "").trim().length > 0),
+        footer_tagline_en: footerTaglineEn.trim(),
+        footer_tagline_fr: footerTaglineFr.trim(),
+        footer_tagline_ar: footerTaglineAr.trim(),
+        advertise_h2_en: advertiseH2En.trim(),
+        advertise_h2_fr: advertiseH2Fr.trim(),
+        advertise_h2_ar: advertiseH2Ar.trim(),
+        advertise_body_en: advertiseBodyEn.trim(),
+        advertise_body_fr: advertiseBodyFr.trim(),
+        advertise_body_ar: advertiseBodyAr.trim(),
+        nav_how_en: navHowEn.trim(),
+        nav_how_fr: navHowFr.trim(),
+        nav_how_ar: navHowAr.trim(),
+        nav_providers_en: navProvidersEn.trim(),
+        nav_providers_fr: navProvidersFr.trim(),
+        nav_providers_ar: navProvidersAr.trim(),
+        nav_contact_en: navContactEn.trim(),
+        nav_contact_fr: navContactFr.trim(),
+        nav_contact_ar: navContactAr.trim(),
+        nav_open_en: navOpenEn.trim(),
+        nav_open_fr: navOpenFr.trim(),
+        nav_open_ar: navOpenAr.trim(),
+        pricing_h2_en: pricingH2En.trim(),
+        pricing_h2_fr: pricingH2Fr.trim(),
+        pricing_h2_ar: pricingH2Ar.trim(),
+        pricing_body_en: pricingBodyEn.trim(),
+        pricing_body_fr: pricingBodyFr.trim(),
+        pricing_body_ar: pricingBodyAr.trim(),
+        pricing_amount: pricingAmount.trim(),
+        pricing_period_en: pricingPeriodEn.trim(),
+        pricing_period_fr: pricingPeriodFr.trim(),
+        pricing_period_ar: pricingPeriodAr.trim(),
+      };
+
+      const updated: any = await api.adminUpdateSettings(patch);
+      setSettings(updated);
+      setSecretOverride("");
+      setTwilioSid("");
+      setTwilioToken("");
+      setHttpHeadersRaw("");
+      Alert.alert("✓", "Settings saved");
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testSms = async () => {
+    if (!smsTestPhone.trim()) {
+      Alert.alert("Phone required", "Enter an Algerian mobile number (e.g. 0555 12 34 56) first.");
+      return;
+    }
+    setSmsTestBusy(true);
+    try {
+      const res: any = await api.adminTestSms(smsTestPhone.trim());
+      if (res.ok) {
+        Alert.alert("✓ SMS sent", `Provider: ${res.provider}${res.sid ? `\nSID: ${res.sid}` : ""}${res.http_status ? `\nHTTP: ${res.http_status}` : ""}`);
+      } else {
+        Alert.alert("✗ Send failed", res.error || "Unknown error");
+      }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed");
+    } finally {
+      setSmsTestBusy(false);
+    }
+  };
+
+  const clearSecretOverride = () => {
+    Alert.alert(
+      "Clear DB secret override?",
+      "The Chargily secret key will fall back to the value stored in the server .env file.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await api.adminUpdateSettings({ chargily_secret_key_override: "" });
+              await load();
+              Alert.alert("✓", "Override cleared. Using .env key.");
+            } catch (e: any) {
+              Alert.alert("Error", e?.message || "Failed");
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const runHealth = async () => {
+    setHealthBusy(true);
+    try {
+      const h: any = await api.adminChargilyHealth();
+      setHealth(h);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Failed");
+    } finally {
+      setHealthBusy(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.root} edges={["top"]}>
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Ionicons name={isRTL ? "chevron-forward" : "chevron-back"} size={26} color={theme.colors.onSurface} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Platform settings</Text>
+          <Text style={styles.subtitle}>Chargily · pricing · trial · payments</Text>
+        </View>
+        <Pressable onPress={load} hitSlop={12}>
+          <Ionicons name="refresh" size={22} color={theme.colors.onSurface} />
+        </Pressable>
+      </View>
+
+      {loading ? (
+        <ActivityIndicator color={theme.colors.brand} style={{ marginTop: theme.spacing.xl }} />
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: theme.spacing.xl, gap: theme.spacing.lg, paddingBottom: theme.spacing.xxxl }}>
+          {/* Chargily section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Chargily Pay</Text>
+            <View style={styles.field}>
+              <Text style={styles.label}>Mode</Text>
+              <View style={styles.modeRow}>
+                <Pressable
+                  onPress={() => setMode("test")}
+                  style={[styles.modeBtn, mode === "test" && styles.modeBtnActive]}
+                >
+                  <Ionicons name="flask" size={14} color={mode === "test" ? theme.colors.brand : theme.colors.muted} />
+                  <Text style={[styles.modeBtnText, mode === "test" && { color: theme.colors.onSurface }]}>Test</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setMode("live")}
+                  style={[styles.modeBtn, mode === "live" && styles.modeBtnActive]}
+                >
+                  <Ionicons name="rocket" size={14} color={mode === "live" ? theme.colors.warning : theme.colors.muted} />
+                  <Text style={[styles.modeBtnText, mode === "live" && { color: theme.colors.onSurface }]}>Live</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.help}>
+                Test uses sandbox URLs and won&apos;t charge real money. Live goes to the production Chargily endpoint.
+              </Text>
+            </View>
+
+            <View style={styles.field}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.label}>Secret key</Text>
+                <View style={[styles.sourcePill, { backgroundColor: (settings?.chargily_secret_key_source === "env" ? theme.colors.success : settings?.chargily_secret_key_source === "db" ? theme.colors.warning : theme.colors.error) + "22" }]}>
+                  <Text style={[styles.sourcePillText, { color: settings?.chargily_secret_key_source === "env" ? theme.colors.success : settings?.chargily_secret_key_source === "db" ? theme.colors.warning : theme.colors.error }]}>
+                    from {settings?.chargily_secret_key_source}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.maskedRow}>
+                <Ionicons name="key" size={14} color={theme.colors.muted} />
+                <Text style={styles.masked}>{settings?.chargily_secret_key_masked || "not configured"}</Text>
+              </View>
+
+              <View style={styles.warnCard}>
+                <Ionicons name="warning" size={14} color={theme.colors.warning} />
+                <Text style={styles.warnText}>
+                  For security, the Chargily secret key should live in the server <Text style={{ fontWeight: "800" }}>.env</Text> file. Overriding it here stores it in the database — only do this if you fully understand the risks.
+                </Text>
+              </View>
+
+              <View style={styles.secretInputRow}>
+                <TextInput
+                  value={secretOverride}
+                  onChangeText={setSecretOverride}
+                  placeholder="Paste secret key to override .env (optional)"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry={!showSecret}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                />
+                <Pressable onPress={() => setShowSecret((s) => !s)} hitSlop={8} style={styles.eyeBtn}>
+                  <Ionicons name={showSecret ? "eye-off" : "eye"} size={18} color={theme.colors.muted} />
+                </Pressable>
+              </View>
+
+              {settings?.chargily_secret_key_source === "db" && (
+                <Pressable onPress={clearSecretOverride} style={styles.linkBtn}>
+                  <Ionicons name="trash" size={12} color={theme.colors.error} />
+                  <Text style={[styles.linkBtnText, { color: theme.colors.error }]}>Clear DB override (revert to .env)</Text>
+                </Pressable>
+              )}
+            </View>
+
+            <Pressable onPress={runHealth} disabled={health_busy} style={styles.healthBtn}>
+              {health_busy ? <ActivityIndicator color={theme.colors.brand} size="small" /> : (
+                <>
+                  <Ionicons name="pulse" size={14} color={theme.colors.brand} />
+                  <Text style={styles.healthBtnText}>Test Chargily connection</Text>
+                </>
+              )}
+            </Pressable>
+            {health && (
+              <View style={[styles.healthCard, { borderColor: health.healthy ? theme.colors.success : theme.colors.error, backgroundColor: (health.healthy ? theme.colors.success : theme.colors.error) + "18" }]}>
+                <Ionicons name={health.healthy ? "checkmark-circle" : "close-circle"} size={16} color={health.healthy ? theme.colors.success : theme.colors.error} />
+                <Text style={[styles.healthText, { color: health.healthy ? theme.colors.success : theme.colors.error }]}>
+                  {health.detail} {health.http_status ? `(HTTP ${health.http_status})` : ""}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Pricing section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Subscription plan</Text>
+            <View style={styles.field}>
+              <Text style={styles.label}>Monthly price (DZD)</Text>
+              <TextInput
+                value={price}
+                onChangeText={(v) => setPrice(v.replace(/[^0-9]/g, ""))}
+                keyboardType="number-pad"
+                style={styles.input}
+                placeholder="1000"
+                placeholderTextColor={theme.colors.muted}
+              />
+              <Text style={styles.help}>Amount charged to providers per month. Changes apply to new checkouts.</Text>
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Free trial (days)</Text>
+              <TextInput
+                value={trial}
+                onChangeText={(v) => setTrial(v.replace(/[^0-9]/g, ""))}
+                keyboardType="number-pad"
+                style={styles.input}
+                placeholder="90"
+                placeholderTextColor={theme.colors.muted}
+              />
+              <Text style={styles.help}>Days from signup until the first payment is due.</Text>
+            </View>
+          </View>
+
+          {/* SMS provider section */}
+          <View style={styles.section}>
+            <View style={styles.rowBetween}>
+              <Text style={styles.sectionTitle}>SMS provider (OTP delivery)</Text>
+              <View
+                style={[
+                  styles.sourcePill,
+                  {
+                    backgroundColor:
+                      (settings?.sms?.healthy ? theme.colors.success : theme.colors.warning) + "22",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.sourcePillText,
+                    { color: settings?.sms?.healthy ? theme.colors.success : theme.colors.warning },
+                  ]}
+                >
+                  {settings?.sms?.provider ?? "mock"}
+                </Text>
+              </View>
+            </View>
+            {!!settings?.sms?.detail && (
+              <Text style={styles.help}>{settings.sms.detail}</Text>
+            )}
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Provider</Text>
+              <View style={styles.modeRow}>
+                {(["mock", "twilio", "http"] as const).map((p) => (
+                  <Pressable
+                    key={p}
+                    testID={`sms-provider-${p}`}
+                    onPress={() => setSmsProvider(p)}
+                    style={[styles.modeBtn, smsProvider === p && styles.modeBtnActive]}
+                  >
+                    <Ionicons
+                      name={p === "twilio" ? "cloud" : p === "http" ? "cloud-upload" : "flask"}
+                      size={14}
+                      color={smsProvider === p ? theme.colors.brand : theme.colors.muted}
+                    />
+                    <Text
+                      style={[
+                        styles.modeBtnText,
+                        smsProvider === p && { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      {p === "mock" ? "Mock (dev)" : p === "twilio" ? "Twilio" : "HTTP gateway"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.help}>
+                {smsProvider === "mock"
+                  ? "Mock only logs the code to the server console — safe for development, not for production."
+                  : smsProvider === "twilio"
+                  ? "Uses Twilio Programmable SMS. Requires Account SID, Auth Token and a from-number."
+                  : "Generic HTTP gateway — good for local Algerian SMS providers. Configure URL + body template."}
+              </Text>
+            </View>
+
+            {smsProvider === "twilio" && (
+              <>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Twilio Account SID</Text>
+                  {settings?.sms?.twilio_account_sid_masked ? (
+                    <View style={styles.maskedRow}>
+                      <Ionicons name="key" size={14} color={theme.colors.muted} />
+                      <Text style={styles.masked}>{settings.sms.twilio_account_sid_masked}</Text>
+                    </View>
+                  ) : null}
+                  <TextInput
+                    testID="sms-twilio-sid"
+                    value={twilioSid}
+                    onChangeText={setTwilioSid}
+                    placeholder={settings?.sms?.twilio_account_sid_masked ? "Leave blank to keep" : "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+                    placeholderTextColor={theme.colors.muted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={styles.input}
+                  />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Twilio Auth Token</Text>
+                  <View style={styles.secretInputRow}>
+                    <TextInput
+                      testID="sms-twilio-token"
+                      value={twilioToken}
+                      onChangeText={setTwilioToken}
+                      placeholder={settings?.sms?.twilio_account_sid_masked ? "Leave blank to keep" : "your-auth-token"}
+                      placeholderTextColor={theme.colors.muted}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      secureTextEntry={!showTwilioToken}
+                      style={styles.input}
+                    />
+                    <Pressable
+                      onPress={() => setShowTwilioToken((s) => !s)}
+                      hitSlop={8}
+                      style={styles.eyeBtn}
+                    >
+                      <Ionicons
+                        name={showTwilioToken ? "eye-off" : "eye"}
+                        size={18}
+                        color={theme.colors.muted}
+                      />
+                    </Pressable>
+                  </View>
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>From-number</Text>
+                  <TextInput
+                    testID="sms-twilio-from"
+                    value={twilioFrom}
+                    onChangeText={setTwilioFrom}
+                    placeholder="+14155552671"
+                    placeholderTextColor={theme.colors.muted}
+                    keyboardType="phone-pad"
+                    autoCapitalize="none"
+                    style={styles.input}
+                  />
+                  <Text style={styles.help}>
+                    A verified Twilio number or messaging service SID. Must support SMS to Algeria (+213).
+                  </Text>
+                </View>
+              </>
+            )}
+
+            {smsProvider === "http" && (
+              <>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Gateway URL</Text>
+                  <TextInput
+                    testID="sms-http-url"
+                    value={httpUrl}
+                    onChangeText={setHttpUrl}
+                    placeholder="https://sms.example.dz/api/send"
+                    placeholderTextColor={theme.colors.muted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    style={styles.input}
+                  />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>HTTP method</Text>
+                  <View style={styles.modeRow}>
+                    {(["GET", "POST", "PUT"] as const).map((m) => (
+                      <Pressable
+                        key={m}
+                        onPress={() => setHttpMethod(m)}
+                        style={[styles.modeBtn, httpMethod === m && styles.modeBtnActive]}
+                      >
+                        <Text style={[styles.modeBtnText, httpMethod === m && { color: theme.colors.onSurface }]}>
+                          {m}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Content-Type</Text>
+                  <TextInput
+                    testID="sms-http-ctype"
+                    value={httpContentType}
+                    onChangeText={setHttpContentType}
+                    placeholder="application/json"
+                    placeholderTextColor={theme.colors.muted}
+                    autoCapitalize="none"
+                    style={styles.input}
+                  />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Body template</Text>
+                  <TextInput
+                    testID="sms-http-body"
+                    value={httpBodyTpl}
+                    onChangeText={setHttpBodyTpl}
+                    multiline
+                    numberOfLines={4}
+                    placeholder={'{"to": "{phone}", "text": "{message}"}'}
+                    placeholderTextColor={theme.colors.muted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.input, { height: 90, textAlignVertical: "top" }]}
+                  />
+                  <Text style={styles.help}>
+                    Placeholders: {"{phone}"} = E.164 number, {"{message}"} = the localized OTP text.
+                  </Text>
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.label}>Extra headers (one per line, `Name: value`)</Text>
+                  {settings?.sms?.http_header_keys && settings.sms.http_header_keys.length > 0 && (
+                    <Text style={styles.help}>
+                      Currently stored: {settings.sms.http_header_keys.join(", ")} (values hidden)
+                    </Text>
+                  )}
+                  <TextInput
+                    testID="sms-http-headers"
+                    value={httpHeadersRaw}
+                    onChangeText={setHttpHeadersRaw}
+                    multiline
+                    numberOfLines={3}
+                    placeholder={"Authorization: Bearer XXX\nX-API-Key: XXX"}
+                    placeholderTextColor={theme.colors.muted}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[styles.input, { height: 72, textAlignVertical: "top" }]}
+                  />
+                </View>
+              </>
+            )}
+
+            <View style={styles.field}>
+              <Text style={styles.label}>Message template</Text>
+              <TextInput
+                testID="sms-msg-template"
+                value={msgTemplate}
+                onChangeText={setMsgTemplate}
+                placeholder="khedmaPro: your verification code is {code}. Valid 5 minutes."
+                placeholderTextColor={theme.colors.muted}
+                multiline
+                numberOfLines={2}
+                style={[styles.input, { height: 72, textAlignVertical: "top" }]}
+              />
+              <Text style={styles.help}>
+                Uses placeholders {"{code}"} and {"{phone}"}. Leave blank to use the default template.
+              </Text>
+            </View>
+
+            {/* Test send row */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Send test SMS to</Text>
+              <View style={styles.secretInputRow}>
+                <TextInput
+                  testID="sms-test-phone"
+                  value={smsTestPhone}
+                  onChangeText={setSmsTestPhone}
+                  placeholder="0555 12 34 56"
+                  placeholderTextColor={theme.colors.muted}
+                  keyboardType="phone-pad"
+                  style={styles.input}
+                />
+                <Pressable
+                  testID="sms-test-btn"
+                  onPress={testSms}
+                  disabled={smsTestBusy}
+                  style={[styles.healthBtn, { paddingHorizontal: 14, borderColor: theme.colors.brand }]}
+                >
+                  {smsTestBusy ? (
+                    <ActivityIndicator color={theme.colors.brand} size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="paper-plane" size={14} color={theme.colors.brand} />
+                      <Text style={styles.healthBtnText}>Send</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+              <Text style={styles.help}>
+                Sends the fixed test code `000000` via the CURRENTLY saved settings.
+              </Text>
+            </View>
+          </View>
+
+          {/* Social media links section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Social media links</Text>
+            <Text style={styles.help}>
+              Empty fields hide the icon everywhere (landing page, client profile, marketing site).
+              These are also served from `/api/public/settings` for third-party embeds.
+            </Text>
+            <View style={styles.field}>
+              <Text style={styles.label}>Facebook URL</Text>
+              <TextInput
+                testID="social-facebook"
+                value={facebookUrl}
+                onChangeText={setFacebookUrl}
+                placeholder="https://facebook.com/khedmapro"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Instagram URL</Text>
+              <TextInput
+                testID="social-instagram"
+                value={instagramUrl}
+                onChangeText={setInstagramUrl}
+                placeholder="https://instagram.com/khedmapro"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>TikTok URL</Text>
+              <TextInput
+                testID="social-tiktok"
+                value={tiktokUrl}
+                onChangeText={setTiktokUrl}
+                placeholder="https://tiktok.com/@khedmapro"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={styles.input}
+              />
+            </View>
+          </View>
+
+          {/* Marketing website content section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Marketing website content</Text>
+            <Text style={styles.help}>
+              Overrides the hero copy on the public marketing site (khedmapro.dz/api/site).
+              Leave blank to use the built-in default translation. Changes go live immediately.
+            </Text>
+
+            <Text style={[styles.label, { marginTop: theme.spacing.sm }]}>Hero title</Text>
+            <View style={styles.field}>
+              <Text style={styles.help}>English</Text>
+              <TextInput
+                testID="site-hero-title-en"
+                value={heroTitleEn}
+                onChangeText={setHeroTitleEn}
+                placeholder="Your city's trusted pros, one tap away."
+                placeholderTextColor={theme.colors.muted}
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Français</Text>
+              <TextInput
+                testID="site-hero-title-fr"
+                value={heroTitleFr}
+                onChangeText={setHeroTitleFr}
+                placeholder="Les pros de confiance de votre ville, à portée de tap."
+                placeholderTextColor={theme.colors.muted}
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>العربية</Text>
+              <TextInput
+                testID="site-hero-title-ar"
+                value={heroTitleAr}
+                onChangeText={setHeroTitleAr}
+                placeholder="محترفو مدينتك الموثوقون، بضغطة واحدة."
+                placeholderTextColor={theme.colors.muted}
+                style={styles.input}
+              />
+            </View>
+
+            <Text style={[styles.label, { marginTop: theme.spacing.sm }]}>Hero subtitle</Text>
+            <View style={styles.field}>
+              <Text style={styles.help}>English</Text>
+              <TextInput
+                testID="site-hero-sub-en"
+                value={heroSubEn}
+                onChangeText={setHeroSubEn}
+                placeholder="One-line description used under the hero title..."
+                placeholderTextColor={theme.colors.muted}
+                multiline
+                style={[styles.input, { height: 72, textAlignVertical: "top" }]}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Français</Text>
+              <TextInput
+                testID="site-hero-sub-fr"
+                value={heroSubFr}
+                onChangeText={setHeroSubFr}
+                placeholder="Description en une ligne..."
+                placeholderTextColor={theme.colors.muted}
+                multiline
+                style={[styles.input, { height: 72, textAlignVertical: "top" }]}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>العربية</Text>
+              <TextInput
+                testID="site-hero-sub-ar"
+                value={heroSubAr}
+                onChangeText={setHeroSubAr}
+                placeholder="وصف من سطر واحد..."
+                placeholderTextColor={theme.colors.muted}
+                multiline
+                style={[styles.input, { height: 72, textAlignVertical: "top" }]}
+              />
+            </View>
+
+            <Text style={[styles.label, { marginTop: theme.spacing.sm }]}>Contact info (shown on /contact page)</Text>
+            <View style={styles.field}>
+              <Text style={styles.help}>Support email</Text>
+              <TextInput
+                testID="site-contact-email"
+                value={contactEmail}
+                onChangeText={setContactEmail}
+                placeholder="support@khedmapro.dz"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Phone (optional — hides the tile if empty)</Text>
+              <TextInput
+                testID="site-contact-phone"
+                value={contactPhone}
+                onChangeText={setContactPhone}
+                placeholder="+213 555 12 34 56"
+                placeholderTextColor={theme.colors.muted}
+                keyboardType="phone-pad"
+                style={styles.input}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>WhatsApp link (optional)</Text>
+              <TextInput
+                testID="site-contact-whatsapp"
+                value={contactWhatsapp}
+                onChangeText={setContactWhatsapp}
+                placeholder="https://wa.me/213555123456"
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="none"
+                keyboardType="url"
+                style={styles.input}
+              />
+            </View>
+
+            {/* --- Section-visibility toggles --- */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>Section visibility</Text>
+            <Text style={styles.help}>
+              Hide or show entire sections of the marketing site. Effective immediately after save.
+            </Text>
+            {[
+              { key: "features", label: "Features grid", value: showFeatures, set: setShowFeatures },
+              { key: "stats", label: "Stats bar (58 wilayas / 3 languages / 90 days)", value: showStats, set: setShowStats },
+              { key: "testimonials", label: "Testimonials section", value: showTestimonials, set: setShowTestimonials },
+              { key: "final_cta", label: "Final call-to-action band", value: showFinalCta, set: setShowFinalCta },
+            ].map((row) => (
+              <View key={row.key} style={styles.sectionToggleRow}>
+                <Text style={styles.sectionToggleLabel}>{row.label}</Text>
+                <Switch
+                  testID={`site-show-${row.key}`}
+                  value={row.value}
+                  onValueChange={row.set}
+                  trackColor={{ true: theme.colors.brand, false: theme.colors.border }}
+                  thumbColor="#fff"
+                />
+              </View>
+            ))}
+
+            {/* --- Feature blurbs (JSON) --- */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>Feature blurbs (advanced, JSON)</Text>
+            <Text style={styles.help}>
+              Overrides the 6 default feature cards. Provide up to 6 items. Empty ⇒ built-in translations.
+              Each item shape: {"{ title_en, title_fr, title_ar, desc_en, desc_fr, desc_ar }"}.
+            </Text>
+            <TextInput
+              testID="site-features-json"
+              value={featuresJson}
+              onChangeText={setFeaturesJson}
+              placeholder='[\n  {\n    "title_en": "Verified pros",\n    "title_fr": "Pros vérifiés",\n    "title_ar": "محترفون موثّقون",\n    "desc_en": "Every provider passes ID and admin review.",\n    "desc_fr": "…",\n    "desc_ar": "…"\n  }\n]'
+              placeholderTextColor={theme.colors.muted}
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.input, { height: 140, textAlignVertical: "top", fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", fontSize: 12 }]}
+            />
+            {featuresJsonError && (
+              <Text style={[styles.help, { color: theme.colors.error }]}>{featuresJsonError}</Text>
+            )}
+
+            {/* --- Testimonials editor --- */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>Testimonials</Text>
+            <Text style={styles.help}>
+              Add short quotes from happy clients or providers. Empty quotes are skipped. Section stays hidden until you add at least one.
+            </Text>
+            {testimonials.map((tst, idx) => (
+              <View key={`testi-${idx}`} style={styles.testimonialCard}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.testimonialCardTitle}>#{idx + 1}</Text>
+                  <Pressable
+                    testID={`site-testimonial-remove-${idx}`}
+                    onPress={() =>
+                      setTestimonials((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    hitSlop={8}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={theme.colors.error} />
+                  </Pressable>
+                </View>
+                <TextInput
+                  testID={`site-testimonial-name-${idx}`}
+                  value={tst.name}
+                  onChangeText={(v) =>
+                    setTestimonials((prev) => prev.map((t, i) => (i === idx ? { ...t, name: v } : t)))
+                  }
+                  placeholder="Name (e.g. Amina B.)"
+                  placeholderTextColor={theme.colors.muted}
+                  style={styles.input}
+                />
+                <TextInput
+                  testID={`site-testimonial-role-${idx}`}
+                  value={tst.role}
+                  onChangeText={(v) =>
+                    setTestimonials((prev) => prev.map((t, i) => (i === idx ? { ...t, role: v } : t)))
+                  }
+                  placeholder="Role (e.g. Cleaning client, Algiers)"
+                  placeholderTextColor={theme.colors.muted}
+                  style={styles.input}
+                />
+                <TextInput
+                  testID={`site-testimonial-avatar-${idx}`}
+                  value={tst.avatar_url || ""}
+                  onChangeText={(v) =>
+                    setTestimonials((prev) => prev.map((t, i) => (i === idx ? { ...t, avatar_url: v } : t)))
+                  }
+                  placeholder="Avatar URL (optional)"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                  keyboardType="url"
+                  style={styles.input}
+                />
+                <TextInput
+                  testID={`site-testimonial-qen-${idx}`}
+                  value={tst.quote_en}
+                  onChangeText={(v) =>
+                    setTestimonials((prev) => prev.map((t, i) => (i === idx ? { ...t, quote_en: v } : t)))
+                  }
+                  placeholder="Quote — English"
+                  placeholderTextColor={theme.colors.muted}
+                  multiline
+                  style={[styles.input, { height: 60, textAlignVertical: "top" }]}
+                />
+                <TextInput
+                  testID={`site-testimonial-qfr-${idx}`}
+                  value={tst.quote_fr}
+                  onChangeText={(v) =>
+                    setTestimonials((prev) => prev.map((t, i) => (i === idx ? { ...t, quote_fr: v } : t)))
+                  }
+                  placeholder="Quote — Français"
+                  placeholderTextColor={theme.colors.muted}
+                  multiline
+                  style={[styles.input, { height: 60, textAlignVertical: "top" }]}
+                />
+                <TextInput
+                  testID={`site-testimonial-qar-${idx}`}
+                  value={tst.quote_ar}
+                  onChangeText={(v) =>
+                    setTestimonials((prev) => prev.map((t, i) => (i === idx ? { ...t, quote_ar: v } : t)))
+                  }
+                  placeholder="Quote — العربية"
+                  placeholderTextColor={theme.colors.muted}
+                  multiline
+                  style={[styles.input, { height: 60, textAlignVertical: "top" }]}
+                />
+              </View>
+            ))}
+            <Pressable
+              testID="site-testimonial-add"
+              onPress={() =>
+                setTestimonials((prev) => [...prev, { name: "", role: "", quote_en: "", quote_fr: "", quote_ar: "", avatar_url: "" }])
+              }
+              style={styles.addTestimonialBtn}
+            >
+              <Ionicons name="add" size={16} color={theme.colors.brand} />
+              <Text style={styles.addTestimonialBtnText}>Add testimonial</Text>
+            </Pressable>
+
+            {/* Footer tagline overrides */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>Footer tagline (per language)</Text>
+            <Text style={styles.help}>Short line under the wordmark in every page footer. Leave blank to use the built-in default.</Text>
+            <View style={styles.field}>
+              <Text style={styles.help}>English</Text>
+              <TextInput testID="site-footer-en" value={footerTaglineEn} onChangeText={setFooterTaglineEn} placeholder="Trusted local service providers across Algeria — verified, rated, ready to help." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 70, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Français</Text>
+              <TextInput testID="site-footer-fr" value={footerTaglineFr} onChangeText={setFooterTaglineFr} placeholder="Des prestataires locaux de confiance à travers l'Algérie — vérifiés, notés, prêts à aider." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 70, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>العربية</Text>
+              <TextInput testID="site-footer-ar" value={footerTaglineAr} onChangeText={setFooterTaglineAr} placeholder="مزوّدو خدمات محليون موثوقون عبر الجزائر — موثقون، مقيّمون، جاهزون للمساعدة." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 70, textAlignVertical: "top" }]} />
+            </View>
+
+            {/* "Advertise with us" section overrides (contact.html) */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>{`"Advertise with us" section (contact page)`}</Text>
+            <Text style={styles.help}>Overrides the pitch shown to brands who want to buy ad slots inside the app. Leave blank to keep the default.</Text>
+            <View style={styles.field}>
+              <Text style={styles.help}>Headline — English</Text>
+              <TextInput testID="site-adv-h2-en" value={advertiseH2En} onChangeText={setAdvertiseH2En} placeholder="Promote your business inside khedmaPro" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Headline — Français</Text>
+              <TextInput testID="site-adv-h2-fr" value={advertiseH2Fr} onChangeText={setAdvertiseH2Fr} placeholder="Faites la promotion de votre marque dans khedmaPro" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Headline — العربية</Text>
+              <TextInput testID="site-adv-h2-ar" value={advertiseH2Ar} onChangeText={setAdvertiseH2Ar} placeholder="روّج لعلامتك التجارية داخل khedmaPro" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Body — English</Text>
+              <TextInput testID="site-adv-body-en" value={advertiseBodyEn} onChangeText={setAdvertiseBodyEn} placeholder="Reach thousands of Algerian home & business owners..." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 90, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Body — Français</Text>
+              <TextInput testID="site-adv-body-fr" value={advertiseBodyFr} onChangeText={setAdvertiseBodyFr} placeholder="Touchez des milliers de propriétaires algériens..." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 90, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Body — العربية</Text>
+              <TextInput testID="site-adv-body-ar" value={advertiseBodyAr} onChangeText={setAdvertiseBodyAr} placeholder="تواصل مع آلاف الأسر والشركات الجزائرية..." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 90, textAlignVertical: "top" }]} />
+            </View>
+
+            {/* --- Header/footer navigation labels --- */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>Navigation labels (all site pages)</Text>
+            <Text style={styles.help}>Override the four header/footer links: How it works · For providers · Contact · Open app.</Text>
+            {[
+              { key: "how", label: "How it works", en: navHowEn, fr: navHowFr, ar: navHowAr, setEn: setNavHowEn, setFr: setNavHowFr, setAr: setNavHowAr },
+              { key: "providers", label: "For providers", en: navProvidersEn, fr: navProvidersFr, ar: navProvidersAr, setEn: setNavProvidersEn, setFr: setNavProvidersFr, setAr: setNavProvidersAr },
+              { key: "contact", label: "Contact", en: navContactEn, fr: navContactFr, ar: navContactAr, setEn: setNavContactEn, setFr: setNavContactFr, setAr: setNavContactAr },
+              { key: "open", label: "Open app (CTA)", en: navOpenEn, fr: navOpenFr, ar: navOpenAr, setEn: setNavOpenEn, setFr: setNavOpenFr, setAr: setNavOpenAr },
+            ].map((row) => (
+              <View key={`nav-${row.key}`} style={styles.testimonialCard}>
+                <Text style={styles.testimonialCardTitle}>{row.label}</Text>
+                <TextInput testID={`site-nav-${row.key}-en`} value={row.en} onChangeText={row.setEn} placeholder={`English (default: ${row.label})`} placeholderTextColor={theme.colors.muted} style={styles.input} />
+                <TextInput testID={`site-nav-${row.key}-fr`} value={row.fr} onChangeText={row.setFr} placeholder="Français" placeholderTextColor={theme.colors.muted} style={styles.input} />
+                <TextInput testID={`site-nav-${row.key}-ar`} value={row.ar} onChangeText={row.setAr} placeholder="العربية" placeholderTextColor={theme.colors.muted} style={styles.input} />
+              </View>
+            ))}
+
+            {/* --- Pricing block on for-providers.html --- */}
+            <Text style={[styles.label, { marginTop: theme.spacing.md }]}>Pricing block (for-providers page)</Text>
+            <Text style={styles.help}>Override the headline, body, monthly amount and period-suffix. Amount is language-neutral (e.g. `1000 DA`).</Text>
+            <View style={styles.field}>
+              <Text style={styles.help}>Headline — English</Text>
+              <TextInput testID="site-pricing-h2-en" value={pricingH2En} onChangeText={setPricingH2En} placeholder="Straightforward pricing." placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Headline — Français</Text>
+              <TextInput testID="site-pricing-h2-fr" value={pricingH2Fr} onChangeText={setPricingH2Fr} placeholder="Tarification simple." placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Headline — العربية</Text>
+              <TextInput testID="site-pricing-h2-ar" value={pricingH2Ar} onChangeText={setPricingH2Ar} placeholder="تسعير بسيط." placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Body — English</Text>
+              <TextInput testID="site-pricing-body-en" value={pricingBodyEn} onChangeText={setPricingBodyEn} placeholder="Start free. Pay a flat monthly fee..." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 80, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Body — Français</Text>
+              <TextInput testID="site-pricing-body-fr" value={pricingBodyFr} onChangeText={setPricingBodyFr} placeholder="Commencez gratuitement..." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 80, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Body — العربية</Text>
+              <TextInput testID="site-pricing-body-ar" value={pricingBodyAr} onChangeText={setPricingBodyAr} placeholder="ابدأ مجاناً..." placeholderTextColor={theme.colors.muted} multiline style={[styles.input, { height: 80, textAlignVertical: "top" }]} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Price amount (language-neutral)</Text>
+              <TextInput testID="site-pricing-amount" value={pricingAmount} onChangeText={setPricingAmount} placeholder="1000 DA" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Period suffix — English</Text>
+              <TextInput testID="site-pricing-period-en" value={pricingPeriodEn} onChangeText={setPricingPeriodEn} placeholder=" / month" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Period suffix — Français</Text>
+              <TextInput testID="site-pricing-period-fr" value={pricingPeriodFr} onChangeText={setPricingPeriodFr} placeholder=" / mois" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.help}>Period suffix — العربية</Text>
+              <TextInput testID="site-pricing-period-ar" value={pricingPeriodAr} onChangeText={setPricingPeriodAr} placeholder=" / شهر" placeholderTextColor={theme.colors.muted} style={styles.input} />
+            </View>
+          </View>
+
+          {/* Payments master switch */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Master switch</Text>
+            <View style={styles.toggleRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Payments enabled</Text>
+                <Text style={styles.help}>Turn OFF during maintenance. Blocks new checkouts but keeps existing subscriptions active.</Text>
+              </View>
+              <Switch
+                value={payEnabled}
+                onValueChange={setPayEnabled}
+                trackColor={{ true: theme.colors.brand, false: theme.colors.border }}
+                thumbColor="#fff"
+              />
+            </View>
+          </View>
+
+          {/* Save */}
+          <Pressable onPress={save} disabled={busy} style={[styles.saveBtn, busy && { opacity: 0.5 }]}>
+            {busy ? <ActivityIndicator color="#fff" /> : (
+              <>
+                <Ionicons name="save" size={16} color="#fff" />
+                <Text style={styles.saveBtnText}>Save settings</Text>
+              </>
+            )}
+          </Pressable>
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: theme.colors.surface },
+  header: { flexDirection: "row", alignItems: "center", padding: theme.spacing.xl, gap: theme.spacing.md },
+  title: { color: theme.colors.onSurface, fontSize: 20, fontWeight: "800" },
+  subtitle: { color: theme.colors.onSurfaceSecondary, fontSize: 12, marginTop: 2 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.spacing.md },
+  emptyText: { color: theme.colors.muted, fontSize: 14 },
+
+  section: {
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    gap: theme.spacing.md,
+  },
+  sectionTitle: { color: theme.colors.onSurface, fontSize: 14, fontWeight: "800" },
+
+  field: { gap: 6 },
+  label: { color: theme.colors.onSurface, fontSize: 13, fontWeight: "700" },
+  help: { color: theme.colors.muted, fontSize: 11, lineHeight: 15 },
+  sectionToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    gap: theme.spacing.md,
+  },
+  sectionToggleLabel: { color: theme.colors.onSurface, fontSize: 13, fontWeight: "600", flex: 1 },
+  testimonialCard: {
+    marginTop: theme.spacing.md,
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    gap: theme.spacing.sm,
+  },
+  testimonialCardTitle: { color: theme.colors.brand, fontWeight: "800", fontSize: 12, letterSpacing: 0.5 },
+  addTestimonialBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: theme.colors.brand,
+    marginTop: theme.spacing.md,
+  },
+  addTestimonialBtnText: { color: theme.colors.brand, fontWeight: "700", fontSize: 13 },
+  input: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    padding: theme.spacing.md,
+    color: theme.colors.onSurface,
+    backgroundColor: theme.colors.surface,
+    fontSize: 14,
+  },
+
+  modeRow: { flexDirection: "row", gap: theme.spacing.sm },
+  modeBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    padding: 10,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  modeBtnActive: { borderColor: theme.colors.brand, backgroundColor: theme.colors.brandTertiary },
+  modeBtnText: { color: theme.colors.onSurfaceSecondary, fontSize: 13, fontWeight: "700" },
+
+  rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  sourcePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: theme.radius.pill },
+  sourcePillText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  maskedRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
+  masked: { color: theme.colors.onSurfaceSecondary, fontFamily: "monospace", fontSize: 13 },
+
+  warnCard: {
+    flexDirection: "row",
+    gap: theme.spacing.sm,
+    padding: theme.spacing.sm,
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.warning + "18",
+    borderWidth: 1,
+    borderColor: theme.colors.warning + "44",
+  },
+  warnText: { color: theme.colors.onSurface, fontSize: 12, lineHeight: 17, flex: 1 },
+
+  secretInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  eyeBtn: { padding: 8 },
+
+  linkBtn: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 4 },
+  linkBtnText: { fontSize: 12, fontWeight: "700" },
+
+  healthBtn: {
+    flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: theme.radius.pill,
+    borderWidth: 1,
+    borderColor: theme.colors.brand,
+  },
+  healthBtnText: { color: theme.colors.brand, fontWeight: "800", fontSize: 13 },
+  healthCard: {
+    flexDirection: "row", gap: 6, alignItems: "center",
+    padding: theme.spacing.sm,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+  },
+  healthText: { fontSize: 12, fontWeight: "700", flex: 1 },
+
+  toggleRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing.md },
+
+  saveBtn: {
+    height: 50, borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.brand,
+    alignItems: "center", justifyContent: "center",
+    flexDirection: "row", gap: 8,
+  },
+  saveBtnText: { color: theme.colors.onBrandPrimary, fontWeight: "800", fontSize: 15 },
+});

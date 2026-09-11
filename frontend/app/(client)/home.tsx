@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TextInput, Pressable,
-  FlatList, ActivityIndicator, RefreshControl, ImageBackground,
+  FlatList, ActivityIndicator, RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -15,6 +15,7 @@ import { useT } from "@/src/language";
 import { WilayaPicker } from "@/src/WilayaPicker";
 import { type DropdownOption } from "@/src/Dropdown";
 import { FiltersSheet, FiltersPill } from "@/src/FiltersSheet";
+import { AdsCarousel } from "@/src/AdsCarousel";
 import { getClientLocation, peekLocationCache, type Coords } from "@/src/utils/location";
 
 // Radius presets in kilometers. "wilaya" and "country" are sentinel scopes.
@@ -48,11 +49,16 @@ export default function Home() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  // Default: "Near me" 5 km. On first GPS attempt we fall back to wilaya/country if denied.
+  // Default: "Near me" 5 km + all categories. If GPS is denied, we fall back
+  // to the user's wilaya (if set) or "All Algeria" so results are still shown.
   const [scope, setScope] = useState<ScopeKey>("5");
   const [coords, setCoords] = useState<Coords | null>(peekLocationCache());
   const [locationDenied, setLocationDenied] = useState(false);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [newOnly, setNewOnly] = useState(false);
+  const [minPrice, setMinPrice] = useState<number | null>(null);
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  const [sort, setSort] = useState<"auto" | "rating" | "distance" | "price_asc" | "price_desc" | "newest">("auto");
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Resolve GPS lazily the first time a radius scope is active. If permission
@@ -92,6 +98,11 @@ export default function Home() {
           lat: useRadius ? coords!.lat : undefined,
           lng: useRadius ? coords!.lng : undefined,
           radius_km: useRadius ? km : undefined,
+          min_price: minPrice ?? undefined,
+          max_price: maxPrice ?? undefined,
+          verified_only: verifiedOnly || undefined,
+          new_only: newOnly || undefined,
+          sort,
         }),
       ]);
       setCategories(cats as any);
@@ -102,7 +113,7 @@ export default function Home() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedCat, search, wilayaCode, scope, coords]);
+  }, [selectedCat, search, wilayaCode, scope, coords, minPrice, maxPrice, verifiedOnly, newOnly, sort]);
 
   useEffect(() => {
     load();
@@ -114,10 +125,9 @@ export default function Home() {
   };
 
   const featured = useMemo(() => providers.slice(0, 5), [providers]);
-  const displayed = useMemo(
-    () => (verifiedOnly ? providers.filter((p: any) => p.is_verified) : providers),
-    [providers, verifiedOnly]
-  );
+  // Server-side filters (verified/price/sort) are applied — no need to
+  // re-filter locally. Kept `displayed` alias for backwards-compat in the JSX.
+  const displayed = providers;
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
@@ -175,7 +185,12 @@ export default function Home() {
           <FiltersPill
             testID="filters-pill"
             activeCount={
-              (scope !== "5" ? 1 : 0) + (selectedCat ? 1 : 0) + (verifiedOnly ? 1 : 0)
+              (scope !== "5" ? 1 : 0)
+              + (selectedCat ? 1 : 0)
+              + (verifiedOnly ? 1 : 0)
+              + (newOnly ? 1 : 0)
+              + (minPrice != null || maxPrice != null ? 1 : 0)
+              + (sort !== "auto" ? 1 : 0)
             }
             label={t("filters.title")}
             onPress={() => setFiltersOpen(true)}
@@ -209,23 +224,7 @@ export default function Home() {
           </View>
         )}
 
-        <View style={styles.promoWrap}>
-          <ImageBackground
-            source={{ uri: "https://images.unsplash.com/photo-1687463221023-02f259da7d77?w=800" }}
-            style={styles.promo}
-            imageStyle={{ borderRadius: theme.radius.lg }}
-          >
-            <LinearGradient
-              colors={["rgba(11,17,32,0.2)", "rgba(11,17,32,0.85)"]}
-              style={[StyleSheet.absoluteFill, { borderRadius: theme.radius.lg }]}
-            />
-            <View style={styles.promoContent}>
-              <Text style={styles.promoBadge}>{t("home.promoBadge")}</Text>
-              <Text style={styles.promoTitle}>{t("home.promoTitle")}</Text>
-              <Text style={styles.promoSub}>{t("home.promoSub")}</Text>
-            </View>
-          </ImageBackground>
-        </View>
+        <AdsCarousel />
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{selectedCat ? t(`cat.${selectedCat}`) : t("home.categories")}</Text>
@@ -300,7 +299,19 @@ export default function Home() {
                   contentFit="cover"
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.providerName} numberOfLines={1}>{p.full_name}</Text>
+                  <View style={styles.providerNameRow}>
+                    <Text style={styles.providerName} numberOfLines={1}>{p.full_name}</Text>
+                    {(p as any).is_verified && (
+                      <View style={styles.verifiedBadge} testID={`provider-verified-${p.id}`}>
+                        <Ionicons name="checkmark-circle" size={14} color={theme.colors.brand} />
+                      </View>
+                    )}
+                    {(p as any).is_new && (
+                      <View style={styles.newPill} testID={`provider-new-${p.id}`}>
+                        <Text style={styles.newPillText}>{t("home.newTag")}</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.providerCat} numberOfLines={1}>
                     {p.category ? t(`cat.${p.category}`) : ""} • {p.city || ""}
                   </Text>
@@ -333,7 +344,7 @@ export default function Home() {
       <FiltersSheet
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
-        state={{ scope, category: selectedCat, verifiedOnly }}
+        state={{ scope, category: selectedCat, verifiedOnly, newOnly, minPrice, maxPrice, sort }}
         scopeOptions={SCOPE_PRESETS.map<DropdownOption>((p) => ({
           value: p.key,
           label:
@@ -360,12 +371,20 @@ export default function Home() {
           if (key !== "wilaya") setWilayaCode(null);
           setSelectedCat(next.category);
           setVerifiedOnly(!!next.verifiedOnly);
+          setNewOnly(!!next.newOnly);
+          setMinPrice(next.minPrice ?? null);
+          setMaxPrice(next.maxPrice ?? null);
+          setSort(next.sort ?? "auto");
         }}
         onReset={() => {
           setScope("5");
           setSelectedCat(null);
           setVerifiedOnly(false);
+          setNewOnly(false);
           setWilayaCode(null);
+          setMinPrice(null);
+          setMaxPrice(null);
+          setSort("auto");
         }}
       />
     </SafeAreaView>
@@ -473,6 +492,20 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.colors.border,
   },
   providerAvatar: { width: 56, height: 56, borderRadius: theme.radius.md, backgroundColor: theme.colors.surfaceTertiary },
+  providerNameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  verifiedBadge: { alignItems: "center", justifyContent: "center" },
+  newPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.brand,
+  },
+  newPillText: {
+    color: theme.colors.onBrandPrimary,
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
   providerName: { color: theme.colors.onSurface, fontSize: 15, fontWeight: "700" },
   providerCat: { color: theme.colors.onSurfaceSecondary, fontSize: 12, marginTop: 2 },
   providerMeta: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 6 },

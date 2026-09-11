@@ -22,6 +22,11 @@ from . import (
     phone_and_flags,
     webhooks,
     push,
+    categories_admin,
+    admin_dashboard,
+    ads,
+    provider_analytics,
+    settings as platform_settings,
 )
 
 
@@ -43,4 +48,9 @@ def build_api_router() -> APIRouter:
     api.include_router(phone_and_flags.router)
     api.include_router(webhooks.router)
     api.include_router(push.router)
+    api.include_router(categories_admin.router)
+    api.include_router(admin_dashboard.router)
+    api.include_router(ads.router)
+    api.include_router(provider_analytics.router)
+    api.include_router(platform_settings.router)
     return api

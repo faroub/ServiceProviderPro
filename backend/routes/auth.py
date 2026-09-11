@@ -3,14 +3,20 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
+import jwt
 from fastapi import APIRouter, Depends, HTTPException
 
 from database import db
-from deps import current_user
+from deps import current_user, login_limiter, registration_limiter
 from phone import normalize_dz_phone
 from reference_data import WILAYAS
 from schemas import LoginIn, RegisterIn, Role, TokenOut
-from security import hash_password, make_token, verify_password
+from security import (
+    hash_password,
+    make_token,
+    verify_password,
+    decode_phone_verification_token,
+)
 from subscription import enforce_lifecycle, serialize_user
 
 
@@ -19,7 +25,7 @@ router = APIRouter(tags=["auth"])
 _VALID_WILAYA_CODES = {w["code"] for w in WILAYAS}
 
 
-@router.post("/auth/register", response_model=TokenOut, status_code=201)
+@router.post("/auth/register", response_model=TokenOut, status_code=201, dependencies=[Depends(registration_limiter)])
 async def register(body: RegisterIn):
     email = body.email.lower()
     if await db.users.find_one({"email": email}):
@@ -44,10 +50,30 @@ async def register(body: RegisterIn):
     normalized_phone = None
     if body.phone and body.phone.strip():
         normalized_phone = normalize_dz_phone(body.phone.strip())
-        # Reject duplicates so we never seed two providers on the same number.
-        existing_phone = await db.users.find_one({"phone_e164": normalized_phone})
-        if existing_phone:
-            raise HTTPException(status_code=409, detail="This phone number is already registered")
+
+    # Enforce OTP verification BEFORE the provider account is created. Clients
+    # aren't subject to this because they can browse anonymously.
+    phone_verified_at = None
+    if body.role == Role.service_provider:
+        if not body.phone_verification_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Phone verification required. Verify your number before completing registration.",
+            )
+        try:
+            payload = decode_phone_verification_token(body.phone_verification_token)
+        except jwt.InvalidTokenError:
+            raise HTTPException(
+                status_code=400,
+                detail="Phone verification token is invalid or expired — please verify again.",
+            )
+        token_phone = payload.get("phone_e164")
+        if not token_phone or token_phone != normalized_phone:
+            raise HTTPException(
+                status_code=400,
+                detail="Phone verification token does not match the phone number being registered.",
+            )
+        phone_verified_at = datetime.now(timezone.utc).isoformat()
 
     user_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -72,16 +98,35 @@ async def register(body: RegisterIn):
         "created_at": now.isoformat(),
         "last_paid_at": None,
     }
+    if phone_verified_at:
+        doc["phone_verified"] = True
+        doc["phone_verified_at"] = phone_verified_at
     # Only set phone_e164 when we have a normalized value — the collection has
     # a sparse UNIQUE index on this field, which rejects explicit nulls.
     if normalized_phone:
         doc["phone_e164"] = normalized_phone
-    await db.users.insert_one(doc)
+
+    # Insert the user document, handling potential race conditions
+    try:
+        await db.users.insert_one(doc)
+    except Exception as e:
+        # Check if it's a duplicate key error
+        if "E11000 duplicate key error" in str(e) or "duplicate key" in str(e).lower():
+            # Determine which field caused the duplicate
+            if await db.users.find_one({"email": email}):
+                raise HTTPException(status_code=409, detail="Email is already registered")
+            if normalized_phone and await db.users.find_one({"phone_e164": normalized_phone}):
+                raise HTTPException(status_code=409, detail="This phone number is already registered")
+            # If we can't determine the exact field, give a generic message
+            raise HTTPException(status_code=409, detail="A user with that email or phone already exists")
+        else:
+            # Re-raise if it's not a duplicate key error
+            raise
     token = make_token(user_id, body.role.value)
     return {"access_token": token, "token_type": "bearer", "user": serialize_user(doc)}
 
 
-@router.post("/auth/login", response_model=TokenOut)
+@router.post("/auth/login", response_model=TokenOut, dependencies=[Depends(login_limiter)])
 async def login(body: LoginIn):
     user = await db.users.find_one({"email": body.email.lower()}, {"_id": 0})
     if not user or not verify_password(body.password, user["password_hash"]):
