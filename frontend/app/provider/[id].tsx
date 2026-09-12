@@ -172,6 +172,10 @@ export default function ProviderDetail() {
                 keyExtractor={(_, i) => `p${i}`}
                 contentContainerStyle={{ gap: 8 }}
                 showsHorizontalScrollIndicator={false}
+                initialNumToRender={2}
+                maxToRenderPerBatch={2}
+                windowSize={3}
+                removeClippedSubviews={true}
                 renderItem={({ item, index }) => {
                   const url = typeof item === "string" ? item : item?.url;
                   const caption = typeof item === "string" ? null : item?.caption;
@@ -183,7 +187,15 @@ export default function ProviderDetail() {
                       onPress={() => setViewerIdx(index)}
                       style={styles.portfolioTile}
                     >
-                      <Image source={{ uri: url }} style={styles.portfolioImg} contentFit="cover" />
+                      <Image
+                        source={{ uri: url }}
+                        style={styles.portfolioImg}
+                        contentFit="cover"
+                        priority={index === 0 ? "high" : "low"}
+                        cachePolicy="memory-disk"
+                        transition={200}
+                        recyclingKey={url}
+                      />
                       {isCover && (
                         <View style={styles.portfolioCoverBadge}>
                           <Ionicons name="star" size={10} color="#fff" />

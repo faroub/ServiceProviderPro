@@ -14,6 +14,8 @@ import {
   Provider, Booking, Review, ChatMessage, ReportItem
 } from './data/mockData';
 import { TRANSLATIONS, Language } from './i18n';
+import { LazyPortfolioImage } from './components/LazyPortfolioImage';
+import { PortfolioLightbox } from './components/PortfolioLightbox';
 
 export default function App() {
   // Localization
@@ -91,6 +93,21 @@ export default function App() {
 
   // Modals & Selections
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [loadAllTrigger, setLoadAllTrigger] = useState<number>(0);
+  const [dataSaverMode, setDataSaverMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('kp_data_saver');
+      if (saved !== null) return saved === 'true';
+      if (typeof navigator !== 'undefined' && 'connection' in navigator) {
+        const conn = (navigator as any).connection;
+        return !!(conn?.saveData || conn?.effectiveType === '2g' || conn?.effectiveType === '3g');
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  });
   const [bookingProvider, setBookingProvider] = useState<Provider | null>(null);
   const [reviewingBooking, setReviewingBooking] = useState<Booking | null>(null);
   const [activeChatThread, setActiveChatThread] = useState<string>('p1');
@@ -1473,13 +1490,76 @@ export default function App() {
               </div>
             </div>
 
-            {/* Portfolio Photos */}
+            {/* Portfolio Photos with Lazy Loading & Mobile Data Saver */}
             {selectedProvider.portfolio && selectedProvider.portfolio.length > 0 && (
               <div>
-                <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">{t.profileModal.portfolio}</h5>
+                <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-2">
+                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      {t.profileModal.portfolio}
+                    </h5>
+                    <span className="text-[11px] font-semibold text-slate-400 bg-slate-950/80 px-2 py-0.5 rounded-full border border-slate-800">
+                      {selectedProvider.portfolio.length} {t.profileModal.photosCount || 'photos'}
+                    </span>
+                  </div>
+
+                  {/* Mobile Data Saver Controls */}
+                  <div className="flex items-center gap-2">
+                    {dataSaverMode && (
+                      <button
+                        id="load-all-portfolio-btn"
+                        type="button"
+                        onClick={() => {
+                          setDataSaverMode(false);
+                          setLoadAllTrigger((prev) => prev + 1);
+                        }}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold underline underline-offset-2"
+                      >
+                        {t.profileModal.loadAllPhotos || 'Load all'}
+                      </button>
+                    )}
+                    <button
+                      id="toggle-data-saver-btn"
+                      type="button"
+                      onClick={() => {
+                        const next = !dataSaverMode;
+                        setDataSaverMode(next);
+                        try {
+                          localStorage.setItem('kp_data_saver', String(next));
+                        } catch {}
+                      }}
+                      title={t.profileModal.dataSaverTip}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-medium border transition-all flex items-center gap-1.5 ${
+                        dataSaverMode
+                          ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                          : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${dataSaverMode ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'}`} />
+                      <span>{dataSaverMode ? t.profileModal.dataSaverOn : t.profileModal.dataSaverOff}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {dataSaverMode && (
+                  <p className="text-[11px] text-slate-400 mb-2.5 flex items-center gap-1.5">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    <span>{t.profileModal.dataSaverTip}</span>
+                  </p>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                   {selectedProvider.portfolio.map((img, idx) => (
-                    <img key={idx} src={img} alt="Past Work" className="rounded-xl h-36 w-full object-cover border border-slate-800 hover:scale-105 transition-transform" />
+                    <LazyPortfolioImage
+                      key={`${selectedProvider.id}-portfolio-${idx}-${loadAllTrigger}`}
+                      src={img}
+                      alt={`${selectedProvider.fullName} past project ${idx + 1}`}
+                      index={idx}
+                      totalCount={selectedProvider.portfolio!.length}
+                      dataSaverMode={dataSaverMode}
+                      onOpenLightbox={(i) => setLightboxIndex(i)}
+                      lang={lang}
+                    />
                   ))}
                 </div>
               </div>
@@ -1534,6 +1614,17 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* PORTFOLIO FULLSCREEN LIGHTBOX VIEWER */}
+      {selectedProvider && lightboxIndex !== null && selectedProvider.portfolio && selectedProvider.portfolio.length > 0 && (
+        <PortfolioLightbox
+          images={selectedProvider.portfolio}
+          currentIndex={lightboxIndex}
+          providerName={selectedProvider.fullName}
+          onClose={() => setLightboxIndex(null)}
+          onSelectIndex={(idx) => setLightboxIndex(idx)}
+        />
       )}
 
       {/* BOOKING MODAL */}
