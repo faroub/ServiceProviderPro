@@ -107,7 +107,7 @@ export default function Home() {
         api.providers({
           category: selectedCat || undefined,
           search: search || undefined,
-          wilaya: scope === "wilaya" ? (wilayaCode || undefined) : undefined,
+          wilaya: wilayaCode || (scope === "wilaya" ? (user?.wilaya_code || undefined) : undefined),
           lat: useRadius ? coords!.lat : undefined,
           lng: useRadius ? coords!.lng : undefined,
           radius_km: useRadius ? km : undefined,

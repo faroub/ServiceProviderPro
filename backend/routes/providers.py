@@ -78,7 +78,7 @@ async def list_providers(
     if category:
         query["category"] = category
     if wilaya:
-        query["$and"].append({"$or": [{"wilaya_code": wilaya}, {"cross_wilaya": True}]})
+        query["$and"].append({"wilaya_code": wilaya})
     if search:
         escaped_search = re.escape(search)
         query["$and"].append({"$or": [
@@ -86,6 +86,8 @@ async def list_providers(
             {"bio": {"$regex": escaped_search, "$options": "i"}},
             {"city": {"$regex": escaped_search, "$options": "i"}},
             {"baladiya": {"$regex": escaped_search, "$options": "i"}},
+            {"wilaya_code": {"$regex": escaped_search, "$options": "i"}},
+            {"wilaya_name": {"$regex": escaped_search, "$options": "i"}},
         ]})
 
     radius_mode = lat is not None and lng is not None and radius_km is not None

@@ -1,10 +1,15 @@
-import { Tabs } from "expo-router";
+import { Tabs, Redirect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "@/src/theme";
 import { useAuth } from "@/src/auth";
 
 export default function ClientLayout() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  if (!loading && user?.role === "service_provider") {
+    return <Redirect href="/(provider)/dashboard" />;
+  }
+
   const isLoggedInClient = user?.role === "client";
 
   return (

@@ -33,6 +33,7 @@ export default function NewBooking() {
   const { user } = useAuth();
   const { t, lang } = useT();
   const [provider, setProvider] = useState<any>(null);
+  const [schedule, setSchedule] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +58,52 @@ export default function NewBooking() {
 
   useEffect(() => {
     if (!providerId) return;
-    api.provider(providerId as string)
-      .then((p: any) => setProvider(p))
-      .catch(() => {})
+    Promise.all([
+      api.provider(providerId as string).catch(() => null),
+      api.getSchedule(providerId as string).catch(() => null)
+    ])
+      .then(([p, s]) => {
+        if (p) setProvider(p);
+        if (s) setSchedule(s);
+      })
       .finally(() => setLoading(false));
   }, [providerId]);
+
+  const availabilityForDay = useMemo(() => {
+    const dateStr = selectedDay.toISOString().split("T")[0];
+    const vacDays = schedule?.vacation_days || [];
+    if (vacDays.includes(dateStr)) {
+      return { available: false, slots: [], reason: "Provider is on vacation on this date" };
+    }
+
+    const dayMap = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    const dayKey = dayMap[selectedDay.getDay()];
+    const workingHours = schedule?.working_hours || {};
+    const dayConfig = workingHours[dayKey];
+
+    if (dayConfig && dayConfig.active === false) {
+      return { available: false, slots: [], reason: `Provider is closed on ${dayKey.toUpperCase()}s` };
+    }
+
+    const startStr = dayConfig?.startTime || "08:00";
+    const endStr = dayConfig?.endTime || "18:00";
+
+    const sH = parseInt(startStr.split(":")[0], 10);
+    const eH = parseInt(endStr.split(":")[0], 10);
+    const slots: string[] = [];
+    let current = sH;
+    while (current + 1 <= eH) {
+      const s = `${String(current).padStart(2, "0")}:00`;
+      slots.push(s);
+      current += 1;
+    }
+
+    return {
+      available: true,
+      slots: slots.length ? slots : TIME_SLOTS,
+      workingHoursStr: `${startStr} - ${endStr}`
+    };
+  }, [selectedDay, schedule]);
 
   const total =
     rateType === "hourly" && provider?.hourly_rate
@@ -181,21 +223,27 @@ export default function NewBooking() {
           </ScrollView>
 
           <Text style={styles.sectionLabel}>{t("booking.selectTime")}</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: theme.spacing.sm }}>
-            {TIME_SLOTS.map((tt) => {
-              const active = selectedTime === tt;
-              return (
-                <Pressable
-                  key={tt}
-                  testID={`time-${tt}`}
-                  onPress={() => setSelectedTime(tt)}
-                  style={[styles.timeChip, active && styles.timeChipActive]}
-                >
-                  <Text style={[styles.timeText, active && styles.timeTextActive]}>{tt}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          {!availabilityForDay.available ? (
+            <View style={{ backgroundColor: "#FEF2F2", borderColor: "#FCA5A5", borderWidth: 1, padding: theme.spacing.md, borderRadius: 12, marginBottom: theme.spacing.md }}>
+              <Text style={{ color: "#991B1B", fontSize: 13, fontWeight: "600" }}>⚠️ {availabilityForDay.reason}</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: theme.spacing.sm }}>
+              {availabilityForDay.slots.map((tt) => {
+                const active = selectedTime === tt;
+                return (
+                  <Pressable
+                    key={tt}
+                    testID={`time-${tt}`}
+                    onPress={() => setSelectedTime(tt)}
+                    style={[styles.timeChip, active && styles.timeChipActive]}
+                  >
+                    <Text style={[styles.timeText, active && styles.timeTextActive]}>{tt}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
 
           <Text style={styles.sectionLabel}>{t("booking.rateType")}</Text>
           <View style={styles.rateRow}>

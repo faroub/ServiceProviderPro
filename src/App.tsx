@@ -18,6 +18,8 @@ import { TRANSLATIONS, Language } from './i18n';
 import { LazyPortfolioImage } from './components/LazyPortfolioImage';
 import { PortfolioLightbox } from './components/PortfolioLightbox';
 import { ClientPortal } from './components/ClientPortal';
+import { ProviderScheduleManager, WeeklyScheduleConfig, DateOverridesMap } from './components/ProviderScheduleManager';
+import { WebPinDropMap } from './components/WebPinDropMap';
 
 export default function App() {
   // Localization (forced LTR layout)
@@ -165,6 +167,7 @@ export default function App() {
   const [bookingTimeSlot, setBookingTimeSlot] = useState('09:00 - 11:00');
   const [bookingType, setBookingType] = useState<'hourly' | 'quote'>('hourly');
   const [bookingAddress, setBookingAddress] = useState('');
+  const [bookingPin, setBookingPin] = useState<{ lat: number; lng: number } | null>({ lat: 36.7538, lng: 3.0588 });
   const [bookingDescription, setBookingDescription] = useState('');
   const [bookingToast, setBookingToast] = useState(false);
 
@@ -172,10 +175,132 @@ export default function App() {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
 
-  // Provider Schedule State
-  const [providerSchedule, setProviderSchedule] = useState({
-    mon: true, tue: true, wed: true, thu: true, fri: false, sat: true, sun: false
+  // Provider Schedule State & Overrides
+  const [providerSchedule, setProviderSchedule] = useState<WeeklyScheduleConfig>(() => {
+    try {
+      const saved = localStorage.getItem('kp_provider_weekly_schedule');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.mon && typeof parsed.mon === 'object') return parsed;
+      }
+    } catch {}
+    return {
+      mon: { active: true, startTime: '08:00', endTime: '17:00' },
+      tue: { active: true, startTime: '08:00', endTime: '17:00' },
+      wed: { active: true, startTime: '08:00', endTime: '17:00' },
+      thu: { active: true, startTime: '08:00', endTime: '17:00' },
+      fri: { active: false, startTime: '08:00', endTime: '12:00' },
+      sat: { active: true, startTime: '09:00', endTime: '16:00' },
+      sun: { active: false, startTime: '08:00', endTime: '17:00' },
+    };
   });
+
+  const [dateOverrides, setDateOverrides] = useState<DateOverridesMap>(() => {
+    try {
+      const saved = localStorage.getItem('kp_provider_date_overrides');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('kp_provider_weekly_schedule', JSON.stringify(providerSchedule));
+    } catch {}
+  }, [providerSchedule]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('kp_provider_date_overrides', JSON.stringify(dateOverrides));
+    } catch {}
+  }, [dateOverrides]);
+
+  // Dynamic Provider Availability calculation for the booking date
+  const bookingProviderAvailability = useMemo(() => {
+    if (!bookingDate || !bookingProvider) {
+      return { available: true, slots: ['09:00 - 11:00', '13:00 - 15:00', '16:00 - 18:00'], bookedSlots: [] as string[], workingHoursStr: "08:00 - 17:00", reason: "" };
+    }
+
+    // 1. Check Date Overrides first
+    const override = dateOverrides[bookingDate];
+    let startStr = "08:00";
+    let endStr = "17:00";
+
+    if (override) {
+      if (override.status === 'blocked') {
+        return {
+          available: false,
+          slots: [] as string[],
+          bookedSlots: [] as string[],
+          workingHoursStr: "",
+          reason: "Provider is unavailable on this date (Marked Day Off / Vacation)."
+        };
+      } else {
+        startStr = override.startTime || "08:00";
+        endStr = override.endTime || "17:00";
+      }
+    } else {
+      // 2. Fallback to Weekly Schedule
+      const dateObj = new Date(bookingDate);
+      const dayNum = dateObj.getDay(); // 0 is Sun, 1 is Mon...
+      const dayMap: (keyof WeeklyScheduleConfig)[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      const dayKey = dayMap[dayNum];
+      const dayConfig = providerSchedule[dayKey];
+
+      if (!dayConfig || !dayConfig.active) {
+        return {
+          available: false,
+          slots: [] as string[],
+          bookedSlots: [] as string[],
+          workingHoursStr: "",
+          reason: `Provider does not work on ${dayKey.toUpperCase()}s.`
+        };
+      }
+      startStr = dayConfig.startTime;
+      endStr = dayConfig.endTime;
+    }
+
+    // 3. Generate dynamic 2-hour time slots within startStr and endStr
+    const sH = parseInt(startStr.split(':')[0], 10);
+    const eH = parseInt(endStr.split(':')[0], 10);
+    const generatedSlots: string[] = [];
+
+    let current = sH;
+    while (current + 2 <= eH) {
+      const s = `${String(current).padStart(2, '0')}:00`;
+      const e = `${String(current + 2).padStart(2, '0')}:00`;
+      generatedSlots.push(`${s} - ${e}`);
+      current += 2;
+    }
+    if (current < eH) {
+      const s = `${String(current).padStart(2, '0')}:00`;
+      const e = `${String(eH).padStart(2, '0')}:00`;
+      generatedSlots.push(`${s} - ${e}`);
+    }
+
+    // Check existing confirmed/pending bookings for this provider on bookingDate
+    const bookedSlotsForDate = bookings
+      .filter(b => (b.providerId === bookingProvider.id || b.providerName === bookingProvider.fullName) && b.date === bookingDate && b.status !== 'cancelled')
+      .map(b => b.timeSlot);
+
+    return {
+      available: true,
+      slots: generatedSlots,
+      bookedSlots: bookedSlotsForDate,
+      workingHoursStr: `${startStr} - ${endStr}`,
+      reason: "",
+    };
+  }, [bookingDate, bookingProvider, providerSchedule, dateOverrides, bookings]);
+
+  useEffect(() => {
+    if (bookingProviderAvailability.available && bookingProviderAvailability.slots.length > 0) {
+      const availableUnbooked = bookingProviderAvailability.slots.filter(s => !bookingProviderAvailability.bookedSlots.includes(s));
+      if (availableUnbooked.length > 0 && !availableUnbooked.includes(bookingTimeSlot)) {
+        setBookingTimeSlot(availableUnbooked[0]);
+      }
+    }
+  }, [bookingProviderAvailability, bookingTimeSlot]);
 
   // Auth Modal State
   const [authPhone, setAuthPhone] = useState('0550123456');
@@ -192,23 +317,30 @@ export default function App() {
     return providers.filter(p => {
       if (!p.active) return false;
       if (selectedCategory && p.category !== selectedCategory) return false;
-      if (selectedWilaya && p.wilayaCode !== selectedWilaya && !p.crossWilaya) return false;
+      if (selectedWilaya && p.wilayaCode !== selectedWilaya) return false;
       if (verifiedOnly && !p.verified) return false;
       if (favoritesOnly && !favoriteIds.includes(p.id)) return false;
       if (maxRate < MAX_RATE_LIMIT && (p.hourlyRate == null || p.hourlyRate > maxRate)) return false;
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
+        const q = searchQuery.toLowerCase().trim();
         const matchesName = p.fullName.toLowerCase().includes(q);
         const matchesBio = p.bio.toLowerCase().includes(q);
         const matchesCity = p.city.toLowerCase().includes(q);
         const matchesBaladiya = p.baladiya.toLowerCase().includes(q);
+        const matchesWilayaCode = p.wilayaCode.toLowerCase().includes(q);
+        const wilayaObj = WILAYAS.find(w => w.code === p.wilayaCode);
+        const matchesWilayaName = wilayaObj && (
+          wilayaObj.en.toLowerCase().includes(q) ||
+          wilayaObj.fr.toLowerCase().includes(q) ||
+          wilayaObj.ar.toLowerCase().includes(q)
+        );
         const categoryObj = CATEGORIES.find(c => c.id === p.category);
         const matchesCat = categoryObj && (
           categoryObj.nameEn.toLowerCase().includes(q) ||
           categoryObj.nameFr.toLowerCase().includes(q) ||
           categoryObj.nameAr.toLowerCase().includes(q)
         );
-        if (!matchesName && !matchesBio && !matchesCity && !matchesBaladiya && !matchesCat) {
+        if (!matchesName && !matchesBio && !matchesCity && !matchesBaladiya && !matchesWilayaCode && !matchesWilayaName && !matchesCat) {
           return false;
         }
       }
@@ -681,7 +813,10 @@ export default function App() {
                     </div>
 
                     <button
-                      onClick={() => {}}
+                      onClick={() => {
+                        const el = document.getElementById('providers-grid-section');
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      }}
                       className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-sm transition-colors flex items-center justify-center gap-2 shadow-md"
                     >
                       <span>{t.hero.searchBtn}</span>
@@ -756,7 +891,7 @@ export default function App() {
             </div>
 
             {/* Filter Bar */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+            <div id="providers-grid-section" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm font-medium text-slate-400">
                 <div>
                   <span className="font-bold text-white">{filteredProviders.length}</span> {t.filters.foundCount}
@@ -1124,144 +1259,194 @@ export default function App() {
 
         {/* VIEW 4: PROVIDER PORTAL DASHBOARD */}
         {activeTab === 'providerDash' && (
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl sm:text-3xl font-black text-white">{t.providerDash.title}</h2>
-                <p className="text-slate-400 text-sm">{t.providerDash.subtitle}</p>
+          currentUserRole !== 'provider' ? (
+            <div className="max-w-3xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-4 shadow-xl">
+              <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
+                <Briefcase className="w-8 h-8" />
               </div>
-              <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Verified Service Provider</span>
+              <h2 className="text-xl font-bold text-white">Professional Space Restricted</h2>
+              <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                You are currently viewing KhedmaPro in Client Mode. Professional features (schedule management, job acceptance, earnings stats, subscription management) are reserved for service provider accounts.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3 pt-2">
+                <button
+                  onClick={() => setCurrentUserRole('provider')}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs transition-colors shadow-md"
+                >
+                  Switch to Professional Account
+                </button>
+                <button
+                  onClick={() => setIsAuthOpen(true)}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-5 py-2.5 rounded-xl text-xs border border-slate-700 transition-colors"
+                >
+                  Register as Service Provider
+                </button>
+                <button
+                  onClick={() => setActiveTab('marketplace')}
+                  className="text-slate-400 hover:text-white font-medium text-xs px-4 py-2.5"
+                >
+                  Return to Marketplace
+                </button>
               </div>
             </div>
-
-            {/* Trial Banner */}
-            <div className="bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent border border-amber-500/30 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg font-black text-amber-400">{t.providerDash.trialBannerTitle}</span>
-                  <span className="bg-amber-500 text-slate-950 text-xs font-bold px-2 py-0.5 rounded-full">
-                    74 {t.providerDash.trialDaysRemaining}
-                  </span>
+          ) : (
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white">{t.providerDash.title}</h2>
+                  <p className="text-slate-400 text-sm">{t.providerDash.subtitle}</p>
                 </div>
-                <p className="text-slate-300 text-xs sm:text-sm max-w-xl">
-                  {t.providerDash.trialBannerDesc}
-                </p>
-              </div>
-              <button
-                onClick={() => alert("Simulation: 1,000 DZD subscription paid via BaridiMob / Edahabia. Active for 30 more days!")}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm shadow-md transition-colors whitespace-nowrap"
-              >
-                {t.providerDash.payBtn}
-              </button>
-            </div>
-
-            {/* 4 Stats Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-                <div className="text-slate-400 text-xs font-medium">{t.providerDash.monthlyEarnings}</div>
-                <div className="text-2xl font-black text-amber-400 mt-1">24,500 {t.currency}</div>
-                <div className="text-[11px] text-emerald-400 font-semibold mt-1">↑ +18% this month</div>
-              </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-                <div className="text-slate-400 text-xs font-medium">{t.providerDash.completedJobs}</div>
-                <div className="text-2xl font-black text-white mt-1">16</div>
-                <div className="text-[11px] text-slate-500 mt-1">100% completion rate</div>
-              </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-                <div className="text-slate-400 text-xs font-medium">{t.providerDash.upcomingJobs}</div>
-                <div className="text-2xl font-black text-white mt-1">{bookings.filter(b => b.status === 'confirmed').length}</div>
-                <div className="text-[11px] text-blue-400 font-semibold mt-1">Next: Saturday</div>
-              </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-                <div className="text-slate-400 text-xs font-medium">{t.providerDash.ratingScore}</div>
-                <div className="text-2xl font-black text-amber-400 mt-1 flex items-center gap-1">
-                  <Star className="w-5 h-5 fill-amber-400" />
-                  <span>4.9</span>
+                <div className="flex items-center gap-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Verified Service Provider</span>
                 </div>
-                <div className="text-[11px] text-slate-500 mt-1">Based on 38 reviews</div>
               </div>
-            </div>
 
-            {/* Incoming Requests & Appointments */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-white mb-4">{t.providerDash.incomingRequests}</h3>
-              <div className="space-y-3">
-                {bookings.map(b => (
-                  <div key={b.id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-sm">{b.clientName}</span>
-                        <span className="text-xs text-slate-400">({b.clientPhone})</span>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-amber-400">
-                          {b.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        📅 {b.date} ({b.timeSlot}) • 📍 {b.address}
-                      </div>
-                      <p className="text-xs text-slate-300 italic mt-1">"{b.description}"</p>
-                    </div>
-
-                    <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-                      {b.status === 'pending' && (
-                        <>
-                          <button
-                            onClick={() => setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'confirmed' } : item))}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg"
-                          >
-                            {t.providerDash.accept}
-                          </button>
-                          <button
-                            onClick={() => setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'cancelled' } : item))}
-                            className="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-semibold text-xs px-3 py-1.5 rounded-lg border border-red-500/30"
-                          >
-                            {t.providerDash.decline}
-                          </button>
-                        </>
-                      )}
-                      {b.status === 'confirmed' && (
-                        <button
-                          onClick={() => setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'completed' } : item))}
-                          className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3 py-1.5 rounded-lg"
-                        >
-                          {t.providerDash.markCompleted}
-                        </button>
-                      )}
-                    </div>
+              {/* Trial Banner */}
+              <div className="bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent border border-amber-500/30 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-black text-amber-400">{t.providerDash.trialBannerTitle}</span>
+                    <span className="bg-amber-500 text-slate-950 text-xs font-bold px-2 py-0.5 rounded-full">
+                      74 {t.providerDash.trialDaysRemaining}
+                    </span>
                   </div>
-                ))}
+                  <p className="text-slate-300 text-xs sm:text-sm max-w-xl">
+                    {t.providerDash.trialBannerDesc}
+                  </p>
+                </div>
+                <button
+                  onClick={() => alert("Simulation: 1,000 DZD subscription paid via BaridiMob / Edahabia. Active for 30 more days!")}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm shadow-md transition-colors whitespace-nowrap"
+                >
+                  {t.providerDash.payBtn}
+                </button>
               </div>
-            </div>
 
-            {/* Weekly Schedule Manager */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-              <h3 className="text-lg font-bold text-white mb-4">{t.providerDash.scheduleTitle}</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
-                {Object.entries(providerSchedule).map(([day, active]) => (
-                  <button
-                    key={day}
-                    onClick={() => setProviderSchedule(prev => ({ ...prev, [day]: !active }))}
-                    className={`p-3 rounded-xl border text-center transition-colors ${
-                      active
-                        ? 'bg-amber-500/15 border-amber-500/40 text-white'
-                        : 'bg-slate-950 border-slate-800 text-slate-500'
-                    }`}
-                  >
-                    <div className="text-xs uppercase font-bold">{day}</div>
-                    <div className="text-[11px] font-semibold mt-1">
-                      {active ? '08:00 - 17:00' : 'Off'}
-                    </div>
-                  </button>
-                ))}
+              {/* 4 Stats Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                  <div className="text-slate-400 text-xs font-medium">{t.providerDash.monthlyEarnings}</div>
+                  <div className="text-2xl font-black text-amber-400 mt-1">24,500 {t.currency}</div>
+                  <div className="text-[11px] text-emerald-400 font-semibold mt-1">↑ +18% this month</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                  <div className="text-slate-400 text-xs font-medium">{t.providerDash.completedJobs}</div>
+                  <div className="text-2xl font-black text-white mt-1">
+                    {bookings.filter(b => (!b.providerName || b.providerName === "Yacine Belkacem") && b.status === 'completed').length + 12}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">100% completion rate</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                  <div className="text-slate-400 text-xs font-medium">{t.providerDash.upcomingJobs}</div>
+                  <div className="text-2xl font-black text-white mt-1">
+                    {bookings.filter(b => (!b.providerName || b.providerName === "Yacine Belkacem") && b.status === 'confirmed').length}
+                  </div>
+                  <div className="text-[11px] text-blue-400 font-semibold mt-1">Next: Saturday</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+                  <div className="text-slate-400 text-xs font-medium">{t.providerDash.ratingScore}</div>
+                  <div className="text-2xl font-black text-amber-400 mt-1 flex items-center gap-1">
+                    <Star className="w-5 h-5 fill-amber-400" />
+                    <span>4.9</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">Based on 38 reviews</div>
+                </div>
               </div>
+
+              {/* Incoming Requests & Appointments */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 className="text-lg font-bold text-white mb-4">{t.providerDash.incomingRequests}</h3>
+                <div className="space-y-3">
+                  {bookings
+                    .filter(b => !b.providerName || b.providerName === "Yacine Belkacem" || b.providerId === 'p1')
+                    .map(b => (
+                    <div key={b.id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-sm">{b.clientName}</span>
+                          <span className="text-xs text-slate-400">({b.clientPhone})</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-amber-400">
+                            {b.status.toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">
+                          📅 {b.date} ({b.timeSlot}) • 📍 {b.address}
+                        </div>
+                        <p className="text-xs text-slate-300 italic mt-1">"{b.description}"</p>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+                        {b.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'confirmed' } : item))}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg"
+                            >
+                              {t.providerDash.accept}
+                            </button>
+                            <button
+                              onClick={() => setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'cancelled' } : item))}
+                              className="bg-red-500/20 hover:bg-red-500/30 text-red-400 font-semibold text-xs px-3 py-1.5 rounded-lg border border-red-500/30"
+                            >
+                              {t.providerDash.decline}
+                            </button>
+                          </>
+                        )}
+                        {b.status === 'confirmed' && (
+                          <button
+                            onClick={() => setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'completed' } : item))}
+                            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3 py-1.5 rounded-lg"
+                          >
+                            {t.providerDash.markCompleted}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Comprehensive Schedule & Availability Manager */}
+              <ProviderScheduleManager
+                schedule={providerSchedule}
+                onUpdateSchedule={setProviderSchedule}
+                overrides={dateOverrides}
+                onUpdateOverrides={setDateOverrides}
+                t={t}
+                lang={lang}
+              />
             </div>
-          </div>
+          )
         )}
 
         {/* VIEW 5: ADMIN MANAGEMENT HUB */}
         {activeTab === 'adminHub' && (
+          currentUserRole !== 'admin' ? (
+            <div className="max-w-3xl mx-auto my-12 p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center space-y-4 shadow-xl">
+              <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl flex items-center justify-center mx-auto">
+                <Shield className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Administrator Access Restricted</h2>
+              <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                The Admin Hub is restricted to platform administrators for provider verifications, content moderation, category management, and platform stats.
+              </p>
+              <div className="flex flex-wrap justify-center gap-3 pt-2">
+                <button
+                  onClick={() => setCurrentUserRole('admin')}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs transition-colors shadow-md"
+                >
+                  Switch to Admin Mode
+                </button>
+                <button
+                  onClick={() => setActiveTab('marketplace')}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-5 py-2.5 rounded-xl text-xs border border-slate-700 transition-colors"
+                >
+                  Return to Marketplace
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
             <div className="flex items-center justify-between">
               <div>
@@ -1379,6 +1564,7 @@ export default function App() {
               </div>
             </div>
           </div>
+          )
         )}
 
         {/* VIEW 6: HOW IT WORKS */}
@@ -1832,35 +2018,120 @@ export default function App() {
 
               {/* Date selection */}
               <div>
-                <label className="font-semibold text-slate-300 block mb-1">{t.bookingModal.dateLabel}</label>
-                <input
-                  type="date"
-                  value={bookingDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setBookingDate(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-400"
-                />
+                <label className="font-semibold text-slate-300 block mb-1.5">{t.bookingModal.dateLabel}</label>
+                
+                {/* 14-Day Carousel Chips with Pro Availability Indicator */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-2 text-xs no-scrollbar">
+                  {Array.from({ length: 14 }).map((_, idx) => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + idx);
+                    const iso = d.toISOString().split('T')[0];
+                    const isSelected = bookingDate === iso;
+
+                    // Check day availability for status dot
+                    const dayNum = d.getDay();
+                    const dayMap: (keyof WeeklyScheduleConfig)[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                    const dayKey = dayMap[dayNum];
+                    const override = dateOverrides[iso];
+                    const dayConfig = providerSchedule[dayKey];
+                    const isWorking = override ? override.status === 'available' : (dayConfig && dayConfig.active);
+
+                    const dayName = d.toLocaleDateString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US', { weekday: 'short' });
+                    const dayNumStr = d.getDate();
+                    const monthStr = d.toLocaleDateString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US', { month: 'short' });
+
+                    return (
+                      <button
+                        key={iso}
+                        type="button"
+                        onClick={() => setBookingDate(iso)}
+                        className={`flex flex-col items-center justify-center min-w-[54px] p-2 rounded-xl border text-center transition-all shrink-0 ${
+                          isSelected
+                            ? 'bg-amber-500 text-slate-950 border-amber-500 font-bold shadow-md scale-105'
+                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 text-[10px] uppercase font-semibold">
+                          <span>{dayName}</span>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isWorking ? 'bg-emerald-400' : 'bg-red-500'}`} title={isWorking ? 'Available' : 'Day Off'} />
+                        </div>
+                        <div className="text-sm font-black mt-0.5">{dayNumStr}</div>
+                        <div className="text-[9px] opacity-75">{monthStr}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400">Or custom date:</span>
+                  <input
+                    type="date"
+                    value={bookingDate}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setBookingDate(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-white outline-none focus:border-amber-400 text-xs"
+                  />
+                </div>
+
+                {!bookingProviderAvailability.available ? (
+                  <div className="mt-2 p-3 bg-red-500/15 border border-red-500/30 rounded-xl text-xs text-red-300 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>{bookingProviderAvailability.reason}</span>
+                  </div>
+                ) : (
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-400">
+                    <span>Working Hours: <strong className="text-amber-400">{bookingProviderAvailability.workingHoursStr}</strong></span>
+                    <span className="text-emerald-400 font-semibold">● Available</span>
+                  </div>
+                )}
               </div>
 
               {/* Time slot chips */}
-              <div>
-                <label className="font-semibold text-slate-300 block mb-1">{t.bookingModal.timeLabel}</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {['09:00 - 11:00', '13:00 - 15:00', '16:00 - 18:00'].map(slot => (
-                    <button
-                      key={slot}
-                      type="button"
-                      onClick={() => setBookingTimeSlot(slot)}
-                      className={`p-2 rounded-xl border text-center ${
-                        bookingTimeSlot === slot
-                          ? 'bg-amber-500/20 border-amber-400 text-amber-400 font-bold'
-                          : 'bg-slate-950 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {slot}
-                    </button>
-                  ))}
+              {bookingProviderAvailability.available && (
+                <div>
+                  <label className="font-semibold text-slate-300 block mb-1">{t.bookingModal.timeLabel}</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {bookingProviderAvailability.slots.map(slot => {
+                      const isBooked = bookingProviderAvailability.bookedSlots.includes(slot);
+                      const isSelected = bookingTimeSlot === slot;
+
+                      return (
+                        <button
+                          key={slot}
+                          type="button"
+                          disabled={isBooked}
+                          onClick={() => setBookingTimeSlot(slot)}
+                          className={`p-2 rounded-xl border text-center text-xs transition-colors ${
+                            isBooked
+                              ? 'bg-slate-950/40 border-slate-850 text-slate-600 cursor-not-allowed line-through'
+                              : isSelected
+                              ? 'bg-amber-500/20 border-amber-400 text-amber-400 font-bold shadow-sm'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div>{slot}</div>
+                          {isBooked && <div className="text-[9px] no-underline font-normal text-red-400">Booked</div>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+              )}
+
+              {/* Service Location Pin Drop Map */}
+              <div>
+                <label className="font-semibold text-slate-300 block mb-1">Service Location Map</label>
+                <WebPinDropMap
+                  initialLat={bookingPin?.lat || 36.7538}
+                  initialLng={bookingPin?.lng || 3.0588}
+                  onPinChange={(lat, lng) => {
+                    setBookingPin({ lat, lng });
+                    if (!bookingAddress) {
+                      setBookingAddress(`Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+                    }
+                  }}
+                  lang={lang}
+                />
               </div>
 
               {/* Address */}
@@ -1899,9 +2170,10 @@ export default function App() {
 
               <button
                 type="submit"
-                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 rounded-xl text-sm transition-colors shadow-md"
+                disabled={!bookingProviderAvailability.available || !bookingTimeSlot}
+                className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold py-3 rounded-xl text-sm transition-colors shadow-md"
               >
-                {t.bookingModal.confirmBtn}
+                {bookingProviderAvailability.available ? t.bookingModal.confirmBtn : "Provider Unavailable on Selected Date"}
               </button>
             </form>
           </div>
@@ -2077,15 +2349,11 @@ export default function App() {
       {/* FOOTER */}
       <footer className="bg-slate-950 border-t border-slate-800/80 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-slate-400">
-          <div className="flex items-center gap-2.5">
-            <div className="w-6 h-6 rounded-lg bg-amber-500 flex items-center justify-center text-slate-950 font-black text-xs">
-              K
-            </div>
-            <span className="font-bold text-white">Khedma<span className="text-amber-400">Pro</span></span>
-            <span className="text-slate-500">— {t.tagline}</span>
+          <div className="flex items-center">
+            <span className="font-bold text-white text-base tracking-tight">Khedma<span className="text-amber-400">Pro</span></span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-6">
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 sm:gap-6 font-medium text-slate-300">
             <button onClick={() => setActiveTab('howItWorks')} className="hover:text-amber-400 transition-colors">
               {t.nav.howItWorks}
             </button>
@@ -2098,10 +2366,13 @@ export default function App() {
             <button onClick={() => { setCurrentUserRole('admin'); setActiveTab('adminHub'); }} className="hover:text-amber-400 transition-colors">
               {t.nav.adminHub}
             </button>
+            <a href="/api/site/terms.html" target="_blank" rel="noopener noreferrer" className="hover:text-amber-400 transition-colors">
+              {t.nav.legal}
+            </a>
           </div>
 
           <div className="text-slate-400 font-semibold tracking-wide bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800/80">
-            © mzilab. Made for algeria
+            © mzilab {new Date().getFullYear()}
           </div>
         </div>
       </footer>

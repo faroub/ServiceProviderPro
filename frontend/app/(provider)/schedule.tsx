@@ -50,10 +50,37 @@ export default function Schedule() {
   const [saved, setSaved] = useState(false);
   const [offline, setOffline] = useState(false);
   const [editing, setEditing] = useState<{ day: string; kind: "start" | "end" } | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
 
   useEffect(() => {
     LocaleConfig.defaultLocale = lang === "en" ? "" : lang;
   }, [lang]);
+
+  // Compute exact dates for the week
+  const getWeekDates = (offset: number) => {
+    const now = new Date();
+    const currentDay = now.getDay();
+    const distanceToMon = (currentDay + 6) % 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - distanceToMon + offset * 7);
+
+    return DAYS.map((d, idx) => {
+      const dateObj = new Date(monday);
+      dateObj.setDate(monday.getDate() + idx);
+      const dayNum = dateObj.getDate();
+      const monthShort = dateObj.toLocaleDateString(lang === 'ar' ? 'ar-DZ' : lang === 'fr' ? 'fr-FR' : 'en-US', { month: 'short' });
+      return {
+        ...d,
+        dateNum: dayNum,
+        monthShort,
+        fullDateStr: dateObj.toISOString().split('T')[0],
+      };
+    });
+  };
+
+  const weekDaysWithDates = getWeekDates(weekOffset);
+  const startWeekStr = `${weekDaysWithDates[0].monthShort} ${weekDaysWithDates[0].dateNum}`;
+  const endWeekStr = `${weekDaysWithDates[6].monthShort} ${weekDaysWithDates[6].dateNum}`;
 
   const load = useCallback(async () => {
     if (!user) {
@@ -160,18 +187,37 @@ export default function Schedule() {
           )}
         </View>
 
-        <Text style={styles.sectionTitle}>{t("schedule.workingHours")}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: theme.spacing.xs }}>
+          <Text style={styles.sectionTitle}>{t("schedule.workingHours")}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: theme.colors.surfaceSecondary, padding: 4, borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.colors.border }}>
+            <Pressable onPress={() => setWeekOffset(w => w - 1)} style={{ padding: 4 }}>
+              <Ionicons name="chevron-back" size={16} color={theme.colors.onSurface} />
+            </Pressable>
+            <Text style={{ fontSize: 11, fontWeight: "700", color: theme.colors.brand }}>
+              {startWeekStr} – {endWeekStr}
+            </Text>
+            <Pressable onPress={() => setWeekOffset(w => w + 1)} style={{ padding: 4 }}>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.onSurface} />
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.card}>
-          {DAYS.map((d, idx) => {
+          {weekDaysWithDates.map((d, idx) => {
             const h = hours[d.key];
             const closed = h === null || h === undefined;
             return (
               <View
                 key={d.key}
-                style={[styles.dayRow, idx < DAYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
+                style={[styles.dayRow, idx < weekDaysWithDates.length - 1 && { borderBottomWidth: 1, borderBottomColor: theme.colors.border }]}
                 testID={`sched-row-${d.key}`}
               >
-                <Text style={styles.dayName}>{t(d.tKey)}</Text>
+                <View style={{ flex: 1, flexDirection: "row", itemsCenter: "center", gap: 6 }}>
+                  <Text style={styles.dayName}>{t(d.tKey)}</Text>
+                  <Text style={{ fontSize: 11, color: theme.colors.brand, fontWeight: "600", alignSelf: "center" }}>
+                    {d.monthShort} {d.dateNum}
+                  </Text>
+                </View>
                 {closed ? (
                   <Pressable
                     testID={`sched-open-${d.key}`}
