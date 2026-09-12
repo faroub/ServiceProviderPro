@@ -1,0 +1,6 @@
+{
+  "name": "khedmaPro",
+  "description": "Algerian service marketplace connecting clients with verified local service providers across all 58 wilayas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

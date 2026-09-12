@@ -57,6 +57,7 @@ export default function Index() {
     );
   }
 
+  if (user?.is_admin || user?.role === "admin") return <Redirect href="/admin" />;
   if (user?.role === "service_provider") return <Redirect href="/(provider)/dashboard" />;
   if (user?.role === "client") return <Redirect href="/(client)/home" />;
 

@@ -28,7 +28,13 @@ export default function Login() {
     setError(null);
     try {
       const u = await login(email.trim().toLowerCase(), password);
-      router.replace(u.role === "service_provider" ? "/(provider)/dashboard" : "/(client)/home");
+      if (u.is_admin || u.role === "admin") {
+        router.replace("/admin");
+      } else if (u.role === "service_provider") {
+        router.replace("/(provider)/dashboard");
+      } else {
+        router.replace("/(client)/home");
+      }
     } catch (e: any) {
       setError(e?.message || "Login failed");
     } finally {

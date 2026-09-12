@@ -283,6 +283,22 @@ export default function Profile() {
         <Text style={styles.sectionLabel}>{t("profile.language")}</Text>
         <LanguageSwitcher testID="profile-lang-switcher" />
 
+        {/* ============ Admin Hub link (if admin) ============ */}
+        {user?.is_admin && (
+          <Pressable
+            testID="profile-admin-hub-btn"
+            onPress={() => router.push("/admin")}
+            style={styles.switchRoleCard}
+          >
+            <Ionicons name="shield-checkmark" size={22} color={theme.colors.brand} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.switchRoleTitle}>{t("admin.hub") || "Admin Hub"}</Text>
+              <Text style={styles.switchRoleSub}>{t("admin.hubSub") || "Manage users, subscriptions, bookings & settings"}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.onSurfaceTertiary} />
+          </Pressable>
+        )}
+
         {/* ============ Danger zone ============ */}
         <Text style={[styles.sectionLabel, { color: theme.colors.error, marginTop: theme.spacing.xl }]}>
           {t("account.dangerZone")}
