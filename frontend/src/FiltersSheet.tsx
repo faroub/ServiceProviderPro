@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { theme } from "./theme";
 import { Dropdown, type DropdownOption } from "./Dropdown";
 import { useT } from "./language";
+import { useResponsive } from "./hooks/useResponsive";
 
 export type SortKey = "auto" | "rating" | "distance" | "price_asc" | "price_desc" | "newest";
 
@@ -55,6 +56,7 @@ export function FiltersSheet({
   onReset,
 }: Props) {
   const { t } = useT();
+  const { isSmall, isTablet } = useResponsive();
   const [local, setLocal] = useState<FiltersState>(state);
   const [minPriceStr, setMinPriceStr] = useState<string>(
     state.minPrice != null ? String(state.minPrice) : ""
@@ -101,11 +103,17 @@ export function FiltersSheet({
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        style={styles.backdrop}
+        style={[styles.backdrop, isTablet && styles.backdropTablet]}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={styles.sheet}>
+        <View
+          style={[
+            styles.sheet,
+            isSmall && styles.sheetSmall,
+            isTablet && styles.sheetTablet,
+          ]}
+        >
           <View style={styles.handle} />
           <View style={styles.header}>
             <Text style={styles.title}>{t("filters.title")}</Text>
@@ -151,7 +159,7 @@ export function FiltersSheet({
               <Text style={styles.fieldLabel}>{t("filters.priceRange")}</Text>
               <Text style={styles.fieldHint}>{t("filters.priceRangeSub")}</Text>
               <View style={styles.priceRow}>
-                <View style={styles.priceInputWrap}>
+                <View style={[styles.priceInputWrap, isSmall && styles.priceInputWrapSmall]}>
                   <Text style={styles.priceInputPrefix}>{t("filters.priceMin")}</Text>
                   <TextInput
                     testID="filter-min-price"
@@ -166,7 +174,7 @@ export function FiltersSheet({
                   <Text style={styles.priceInputSuffix}>{t("filters.priceCurrency")}</Text>
                 </View>
                 <Text style={styles.priceDash}>—</Text>
-                <View style={styles.priceInputWrap}>
+                <View style={[styles.priceInputWrap, isSmall && styles.priceInputWrapSmall]}>
                   <Text style={styles.priceInputPrefix}>{t("filters.priceMax")}</Text>
                   <TextInput
                     testID="filter-max-price"
@@ -180,6 +188,28 @@ export function FiltersSheet({
                   />
                   <Text style={styles.priceInputSuffix}>{t("filters.priceCurrency")}</Text>
                 </View>
+              </View>
+              {/* Quick rate preset chips */}
+              <View style={styles.quickPriceRow}>
+                {[
+                  { label: t("home.all") || "All", max: "" },
+                  { label: "≤ 800", max: "800" },
+                  { label: "≤ 1,200", max: "1200" },
+                  { label: "≤ 2,000", max: "2000" },
+                ].map((preset) => {
+                  const isSelected = preset.max === "" ? maxPriceStr === "" : maxPriceStr === preset.max;
+                  return (
+                    <Pressable
+                      key={preset.label}
+                      onPress={() => setMaxPriceStr(preset.max)}
+                      style={[styles.quickPriceChip, isSelected && styles.quickPriceChipActive]}
+                    >
+                      <Text style={[styles.quickPriceText, isSelected && styles.quickPriceTextActive]}>
+                        {preset.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
 
@@ -303,12 +333,29 @@ export function FiltersPill({
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+  backdropTablet: { justifyContent: "center", alignItems: "center", padding: 24 },
   sheet: {
     backgroundColor: theme.colors.surface,
     borderTopLeftRadius: theme.radius.lg,
     borderTopRightRadius: theme.radius.lg,
     padding: theme.spacing.xl,
     maxHeight: "85%",
+  },
+  sheetSmall: {
+    paddingHorizontal: 14,
+    paddingTop: theme.spacing.sm,
+  },
+  sheetTablet: {
+    maxWidth: 520,
+    width: "100%",
+    alignSelf: "center",
+    borderRadius: theme.radius.lg,
+    maxHeight: "80%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 12,
   },
   handle: {
     alignSelf: "center",
@@ -356,6 +403,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
+  priceInputWrapSmall: {
+    paddingHorizontal: 8,
+    gap: 4,
+  },
   priceInputPrefix: { color: theme.colors.muted, fontSize: 11, fontWeight: "700" },
   priceInput: {
     flex: 1,
@@ -367,6 +418,35 @@ const styles = StyleSheet.create({
   },
   priceInputSuffix: { color: theme.colors.brand, fontSize: 11, fontWeight: "800" },
   priceDash: { color: theme.colors.muted, fontSize: 14, fontWeight: "700" },
+
+  // Quick price chips
+  quickPriceRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  quickPriceChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  quickPriceChipActive: {
+    backgroundColor: "rgba(212, 175, 55, 0.15)",
+    borderColor: theme.colors.brand,
+  },
+  quickPriceText: {
+    color: theme.colors.onSurfaceSecondary,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  quickPriceTextActive: {
+    color: theme.colors.brand,
+    fontWeight: "800",
+  },
 
   // Sort chips
   sortRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

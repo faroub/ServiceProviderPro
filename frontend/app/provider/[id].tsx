@@ -11,6 +11,8 @@ import { api } from "@/src/api";
 import { theme } from "@/src/theme";
 import { useT } from "@/src/language";
 import { useAuth } from "@/src/auth";
+import { getFavoriteProviderIds, toggleFavoriteProviderId } from "@/src/favoritesStorage";
+import { useResponsive } from "@/src/hooks/useResponsive";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -19,6 +21,7 @@ export default function ProviderDetail() {
   const router = useRouter();
   const { t, isRTL } = useT();
   const { user } = useAuth();
+  const { isSmall, isTablet, gutter, width: winW, height: winH } = useResponsive();
   const [provider, setProvider] = useState<any>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +34,20 @@ export default function ProviderDetail() {
   const [reviewPhoto, setReviewPhoto] = useState<string | null>(null);
   const [reportSuccess, setReportSuccess] = useState(false);
   const [viewerIdx, setViewerIdx] = useState<number | null>(null);
+  const [isFavorited, setIsFavorited] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    getFavoriteProviderIds().then((ids) => {
+      setIsFavorited(ids.includes(id as string));
+    });
+  }, [id]);
+
+  const onToggleFavorite = async () => {
+    if (!id) return;
+    const next = await toggleFavoriteProviderId(id as string);
+    setIsFavorited(next.includes(id as string));
+  };
 
   const REPORT_REASONS = [
     { key: "no_show", tKey: "report.reasons.noShow" },
@@ -105,14 +122,27 @@ export default function ProviderDetail() {
             colors={["rgba(11,17,32,0.4)", "rgba(11,17,32,0.95)"]}
             style={StyleSheet.absoluteFill}
           />
-          <SafeAreaView edges={["top"]}>
+          <SafeAreaView edges={["top"]} style={styles.topNavRow}>
             <Pressable onPress={() => router.back()} style={styles.backBtn} testID="provider-back-btn">
               <Ionicons name="chevron-back" size={24} color={theme.colors.onSurface} />
+            </Pressable>
+            <Pressable onPress={onToggleFavorite} style={styles.favBtn} testID="provider-fav-btn">
+              <Ionicons
+                name={isFavorited ? "heart" : "heart-outline"}
+                size={22}
+                color={isFavorited ? "#f43f5e" : theme.colors.onSurface}
+              />
             </Pressable>
           </SafeAreaView>
         </ImageBackground>
 
-        <View style={styles.card}>
+        <View
+          style={[
+            styles.card,
+            { marginHorizontal: gutter },
+            isTablet && { maxWidth: 720, width: "100%", alignSelf: "center" },
+          ]}
+        >
           <View style={styles.avatarWrap}>
             <Image
               source={{ uri: provider.avatar_url || "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400" }}
@@ -215,8 +245,15 @@ export default function ProviderDetail() {
               />
             </>
           )}
-          <View style={styles.reviewsHeader}>
-            <Text style={styles.sectionTitle}>{t("provider.reviews")} ({reviews.length})</Text>
+          <View
+            style={[
+              styles.reviewsSection,
+              { paddingHorizontal: gutter },
+              isTablet && { maxWidth: 720, width: "100%", alignSelf: "center" },
+            ]}
+          >
+            <View style={styles.reviewsHeader}>
+              <Text style={styles.sectionTitle}>{t("provider.reviews")} ({reviews.length})</Text>
             <Pressable
               testID="write-review-btn"
               style={styles.writeReviewBtn}
@@ -276,8 +313,8 @@ export default function ProviderDetail() {
             pagingEnabled
             initialScrollIndex={viewerIdx || 0}
             getItemLayout={(_, i) => ({
-              length: SCREEN_W,
-              offset: SCREEN_W * i,
+              length: winW,
+              offset: winW * i,
               index: i,
             })}
             keyExtractor={(_, i) => `v${i}`}
@@ -287,8 +324,18 @@ export default function ProviderDetail() {
               const caption = typeof item === "string" ? null : item?.caption;
               const tags = typeof item === "string" ? [] : item?.tags || [];
               return (
-                <View style={styles.viewerPage}>
-                  <Image source={{ uri: url }} style={styles.viewerImg} contentFit="contain" />
+                <View style={[styles.viewerPage, { width: winW, height: winH }]}>
+                  <ScrollView
+                    maximumZoomScale={4}
+                    minimumZoomScale={1}
+                    showsHorizontalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
+                    centerContent
+                    bouncesZoom={true}
+                    contentContainerStyle={{ width: winW, height: winH, justifyContent: "center", alignItems: "center" }}
+                  >
+                    <Image source={{ uri: url }} style={[styles.viewerImg, { width: winW, height: winH }]} contentFit="contain" />
+                  </ScrollView>
                   {(caption || tags.length > 0) && (
                     <View style={styles.viewerMeta}>
                       {caption ? <Text style={styles.viewerCaption}>{caption}</Text> : null}
@@ -318,31 +365,33 @@ export default function ProviderDetail() {
         </View>
       </Modal>
 
-      <SafeAreaView edges={["bottom"]} style={styles.ctaBar}>
-        <Pressable
-          testID="message-provider-btn"
-          style={styles.msgBtn}
-          onPress={() => router.push(`/chat/${provider.id}?name=${encodeURIComponent(provider.full_name)}`)}
-        >
-          <Ionicons name="chatbubble-ellipses" size={18} color={theme.colors.brand} />
-          <Text style={styles.msgBtnText}>{t("chat.messageBtn")}</Text>
-        </Pressable>
-        <Pressable
-          testID="request-booking-btn"
-          style={[styles.cta, isRTL && { flexDirection: "row-reverse" }]}
-          onPress={() => router.push(`/booking/new?providerId=${provider.id}`)}
-        >
-          <Text
-            style={styles.ctaText}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.75}
-            allowFontScaling={false}
+      <SafeAreaView edges={["bottom"]} style={[styles.ctaBar, { paddingHorizontal: gutter }]}>
+        <View style={[styles.ctaInner, isTablet && { maxWidth: 720, width: "100%", alignSelf: "center" }]}>
+          <Pressable
+            testID="message-provider-btn"
+            style={styles.msgBtn}
+            onPress={() => router.push(`/chat/${provider.id}?name=${encodeURIComponent(provider.full_name)}`)}
           >
-            {t("provider.requestBooking")}
-          </Text>
-          <Ionicons name={isRTL ? "arrow-back" : "arrow-forward"} size={18} color={theme.colors.onBrandPrimary} />
-        </Pressable>
+            <Ionicons name="chatbubble-ellipses" size={18} color={theme.colors.brand} />
+            <Text style={styles.msgBtnText}>{t("chat.messageBtn")}</Text>
+          </Pressable>
+          <Pressable
+            testID="request-booking-btn"
+            style={[styles.cta, isRTL && { flexDirection: "row-reverse" }]}
+            onPress={() => router.push(`/booking/new?providerId=${provider.id}`)}
+          >
+            <Text
+              style={styles.ctaText}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+              allowFontScaling={false}
+            >
+              {t("provider.requestBooking")}
+            </Text>
+            <Ionicons name={isRTL ? "arrow-back" : "arrow-forward"} size={18} color={theme.colors.onBrandPrimary} />
+          </Pressable>
+        </View>
       </SafeAreaView>
 
       {/* Report modal */}
@@ -443,7 +492,17 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.surface },
   center: { flex: 1, backgroundColor: theme.colors.surface, alignItems: "center", justifyContent: "center" },
   hero: { height: 240 },
+  topNavRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: theme.spacing.sm,
+  },
   backBtn: {
+    margin: theme.spacing.md, width: 40, height: 40, borderRadius: 20,
+    backgroundColor: "rgba(11,17,32,0.6)", alignItems: "center", justifyContent: "center",
+  },
+  favBtn: {
     margin: theme.spacing.md, width: 40, height: 40, borderRadius: 20,
     backgroundColor: "rgba(11,17,32,0.6)", alignItems: "center", justifyContent: "center",
   },
@@ -555,9 +614,11 @@ const styles = StyleSheet.create({
   },
   ctaBar: {
     position: "absolute", bottom: 0, left: 0, right: 0,
-    padding: theme.spacing.md, paddingHorizontal: theme.spacing.xl,
+    padding: theme.spacing.md,
     backgroundColor: "rgba(11,17,32,0.95)", borderTopWidth: 1, borderTopColor: theme.colors.border,
-    flexDirection: "row", alignItems: "center", gap: theme.spacing.sm,
+  },
+  ctaInner: {
+    flexDirection: "row", alignItems: "center", gap: theme.spacing.sm, width: "100%",
   },
   msgBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",

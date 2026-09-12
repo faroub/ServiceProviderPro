@@ -19,6 +19,7 @@ import { useT } from "@/src/language";
 import { LanguageSwitcher } from "@/src/LanguageSwitcher";
 import { SocialLinksRow } from "@/src/SocialLinksRow";
 import { BrandText } from "@/src/BrandText";
+import { useResponsive } from "@/src/hooks/useResponsive";
 
 type Feature = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -38,6 +39,7 @@ export default function Index() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const { t, isRTL } = useT();
+  const { isSmall, isTablet, gutter } = useResponsive();
 
   // Ensure any lingering keyboard from a previous screen is dismissed
   // as soon as the landing screen becomes focused. This prevents a leftover
@@ -73,7 +75,14 @@ export default function Index() {
         locations={[0, 0.55, 1]}
         style={StyleSheet.absoluteFill}
       />
-      <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
+      <SafeAreaView
+        style={[
+          styles.container,
+          { paddingHorizontal: gutter },
+          isTablet && { maxWidth: 760, width: "100%", alignSelf: "center" },
+        ]}
+        edges={["top", "bottom"]}
+      >
         <View style={styles.topRow}>
           <View style={styles.brandRow}>
             <LinearGradient
@@ -121,7 +130,11 @@ export default function Index() {
                   </View>
                 </View>
                 <Text
-                  style={[styles.promoTitle, isRTL && { textAlign: "right", writingDirection: "rtl" }]}
+                  style={[
+                    styles.promoTitle,
+                    isSmall && { fontSize: 18, lineHeight: 22 },
+                    isRTL && { textAlign: "right", writingDirection: "rtl" },
+                  ]}
                   numberOfLines={2}
                 >
                   {t("landing.heroTitle")}
@@ -139,7 +152,15 @@ export default function Index() {
           {/* Feature grid 2x2 */}
           <View style={styles.featureGrid} testID="landing-features">
             {FEATURES.map((f) => (
-              <View key={f.titleKey} style={styles.featureCard} testID={`feature-${f.titleKey}`}>
+              <View
+                key={f.titleKey}
+                style={[
+                  styles.featureCard,
+                  isSmall && { flexBasis: "100%" },
+                  isTablet && { flexBasis: "23%" },
+                ]}
+                testID={`feature-${f.titleKey}`}
+              >
                 <View style={[styles.featureIconWrap, { backgroundColor: `${f.color}22`, borderColor: `${f.color}44` }]}>
                   <Ionicons name={f.icon} size={18} color={f.color} />
                 </View>

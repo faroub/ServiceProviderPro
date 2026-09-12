@@ -23,7 +23,7 @@
       "footer.advertise": "Advertise with us",
       "footer.terms": "Terms of service",
       "footer.privacy": "Privacy policy",
-      "footer.fine": "© 2026 khedmaPro. Made in Algeria 🇩🇿",
+      "footer.fine": "© mzilab. Made for algeria",
       "footer.tagline": "Trusted local service providers across Algeria — verified, rated, ready to help.",
 
       // Home
@@ -218,7 +218,7 @@
       "footer.advertise": "Annoncer chez nous",
       "footer.terms": "Conditions d'utilisation",
       "footer.privacy": "Politique de confidentialité",
-      "footer.fine": "© 2026 khedmaPro. Fait en Algérie 🇩🇿",
+      "footer.fine": "© mzilab. Made for algeria",
       "footer.tagline": "Prestataires de services locaux de confiance en Algérie — vérifiés, notés, prêts à vous aider.",
 
       "home.title": "khedmaPro — Prestataires de confiance en Algérie, à un clic",
@@ -407,7 +407,7 @@
       "footer.advertise": "أعلن معنا",
       "footer.terms": "شروط الاستخدام",
       "footer.privacy": "سياسة الخصوصية",
-      "footer.fine": "© 2026 khedmaPro. صُنع في الجزائر 🇩🇿",
+      "footer.fine": "© mzilab. Made for algeria",
       "footer.tagline": "مزوّدو خدمات محليون موثوقون في الجزائر — موثّقون، مُقيَّمون، جاهزون للمساعدة.",
 
       "home.title": "khedmaPro — محترفون محليون موثوقون في الجزائر بضغطة واحدة",
@@ -593,7 +593,7 @@
 
   function apply(lang) {
     document.documentElement.lang = lang;
-    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+    document.documentElement.dir = "ltr";
 
     // Body text nodes
     document.querySelectorAll("[data-i18n]").forEach(function (el) {

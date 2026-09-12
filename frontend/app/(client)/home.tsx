@@ -17,6 +17,8 @@ import { type DropdownOption } from "@/src/Dropdown";
 import { FiltersSheet, FiltersPill } from "@/src/FiltersSheet";
 import { AdsCarousel } from "@/src/AdsCarousel";
 import { getClientLocation, peekLocationCache, type Coords } from "@/src/utils/location";
+import { getFavoriteProviderIds, toggleFavoriteProviderId } from "@/src/favoritesStorage";
+import { useResponsive } from "@/src/hooks/useResponsive";
 
 // Radius presets in kilometers. "wilaya" and "country" are sentinel scopes.
 type ScopeKey = "2" | "5" | "10" | "25" | "50" | "wilaya" | "country";
@@ -42,6 +44,7 @@ export default function Home() {
   const { user } = useAuth();
   const router = useRouter();
   const { t, isRTL } = useT();
+  const { isSmall, isTablet, gutter } = useResponsive();
   const [search, setSearch] = useState("");
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [wilayaCode, setWilayaCode] = useState<string | null>(null);
@@ -60,6 +63,16 @@ export default function Home() {
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [sort, setSort] = useState<"auto" | "rating" | "distance" | "price_asc" | "price_desc" | "newest">("auto");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    getFavoriteProviderIds().then(setFavoriteIds);
+  }, []);
+
+  const onToggleFavorite = async (providerId: string) => {
+    const next = await toggleFavoriteProviderId(providerId);
+    setFavoriteIds(next);
+  };
 
   // Resolve GPS lazily the first time a radius scope is active. If permission
   // is denied, fall back to the user's profile wilaya (or All Algeria).
@@ -131,7 +144,7 @@ export default function Home() {
 
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: gutter }]}>
         <View style={styles.headerLeft}>
           {!user && (
             <Pressable
@@ -169,7 +182,7 @@ export default function Home() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.brand} />}
       >
-        <View style={styles.searchRow}>
+        <View style={[styles.searchRow, { paddingHorizontal: gutter }]}>
           <View style={styles.searchWrap}>
             <Ionicons name="search" size={18} color={theme.colors.muted} />
             <TextInput
@@ -197,15 +210,42 @@ export default function Home() {
           />
         </View>
 
+        {/* Active Price Filter badge */}
+        {(minPrice != null || maxPrice != null) && (
+          <View style={[styles.activeFiltersRow, { paddingHorizontal: gutter }]}>
+            <View style={styles.activePricePill}>
+              <Ionicons name="pricetag" size={12} color={theme.colors.brand} />
+              <Text style={styles.activePriceText}>
+                {minPrice != null && maxPrice != null
+                  ? `${minPrice.toLocaleString()} - ${maxPrice.toLocaleString()} DZD/hr`
+                  : maxPrice != null
+                  ? `≤ ${maxPrice.toLocaleString()} DZD/hr`
+                  : `≥ ${minPrice.toLocaleString()} DZD/hr`}
+              </Text>
+              <Pressable
+                hitSlop={8}
+                testID="clear-price-filter-pill"
+                onPress={() => {
+                  setMinPrice(null);
+                  setMaxPrice(null);
+                }}
+                style={{ padding: 2 }}
+              >
+                <Ionicons name="close-circle" size={14} color={theme.colors.brand} />
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         {locationDenied && SCOPE_PRESETS.find((p) => p.key === scope)?.km != null && (
-          <View style={styles.locHint} testID="location-denied-hint">
+          <View style={[styles.locHint, { marginHorizontal: gutter }]} testID="location-denied-hint">
             <Ionicons name="information-circle-outline" size={14} color={theme.colors.warning} />
             <Text style={styles.locHintText}>{t("home.locationDenied")}</Text>
           </View>
         )}
 
         {scope === "wilaya" && (
-          <View style={{ paddingHorizontal: theme.spacing.xl, marginTop: theme.spacing.md, flexDirection: "row", gap: theme.spacing.sm }}>
+          <View style={{ paddingHorizontal: gutter, marginTop: theme.spacing.md, flexDirection: "row", gap: theme.spacing.sm }}>
             <WilayaPicker
               testID="home-wilaya-picker"
               compact
@@ -226,20 +266,20 @@ export default function Home() {
 
         <AdsCarousel />
 
-        <View style={styles.sectionHeader}>
+        <View style={[styles.sectionHeader, { paddingHorizontal: gutter }]}>
           <Text style={styles.sectionTitle}>{selectedCat ? t(`cat.${selectedCat}`) : t("home.categories")}</Text>
         </View>
 
         {featured.length > 0 && (
           <>
-            <View style={styles.sectionHeader}>
+            <View style={[styles.sectionHeader, { paddingHorizontal: gutter }]}>
               <Text style={styles.sectionTitle}>{t("home.topRated")}</Text>
             </View>
             <FlatList
               horizontal
               data={featured}
               keyExtractor={(p) => p.id}
-              contentContainerStyle={{ paddingHorizontal: theme.spacing.xl, gap: theme.spacing.md }}
+              contentContainerStyle={{ paddingHorizontal: gutter, gap: theme.spacing.md }}
               showsHorizontalScrollIndicator={false}
               renderItem={({ item }) => (
                 <Pressable
@@ -272,7 +312,7 @@ export default function Home() {
           </>
         )}
 
-        <View style={styles.sectionHeader}>
+        <View style={[styles.sectionHeader, { paddingHorizontal: gutter }]}>
           <Text style={styles.sectionTitle}>{t("home.allProviders")}</Text>
           <Text style={styles.sectionCount}>{displayed.length}</Text>
         </View>
@@ -285,17 +325,21 @@ export default function Home() {
             <Text style={styles.emptyText}>{t("home.noResults")}</Text>
           </View>
         ) : (
-          <View style={{ paddingHorizontal: theme.spacing.xl, gap: theme.spacing.md }}>
+          <View style={{ paddingHorizontal: gutter, flexDirection: isTablet ? "row" : "column", flexWrap: isTablet ? "wrap" : "nowrap", gap: theme.spacing.md }}>
             {displayed.map((p) => (
               <Pressable
                 key={p.id}
                 testID={`provider-${p.id}`}
-                style={styles.providerRow}
+                style={[
+                  styles.providerRow,
+                  isSmall && styles.providerRowSmall,
+                  isTablet && styles.providerRowTablet,
+                ]}
                 onPress={() => router.push(`/provider/${p.id}`)}
               >
                 <Image
                   source={{ uri: p.avatar_url || "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200" }}
-                  style={styles.providerAvatar}
+                  style={[styles.providerAvatar, isSmall && styles.providerAvatarSmall]}
                   contentFit="cover"
                 />
                 <View style={{ flex: 1 }}>
@@ -315,7 +359,7 @@ export default function Home() {
                   <Text style={styles.providerCat} numberOfLines={1}>
                     {p.category ? t(`cat.${p.category}`) : ""} • {p.city || ""}
                   </Text>
-                  <View style={styles.providerMeta}>
+                  <View style={[styles.providerMeta, isSmall && { flexWrap: "wrap", gap: 3 }]}>
                     <Ionicons name="star" size={12} color={theme.colors.brand} />
                     <Text style={styles.providerRating}>{p.rating.toFixed(1)}</Text>
                     <Text style={styles.providerReviews}>({p.reviews_count})</Text>
@@ -334,6 +378,21 @@ export default function Home() {
                     )}
                   </View>
                 </View>
+                <Pressable
+                  hitSlop={8}
+                  testID={`fav-${p.id}`}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(p.id);
+                  }}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons
+                    name={favoriteIds.includes(p.id) ? "heart" : "heart-outline"}
+                    size={20}
+                    color={favoriteIds.includes(p.id) ? "#f43f5e" : theme.colors.muted}
+                  />
+                </Pressable>
                 <Ionicons name={isRTL ? "chevron-back" : "chevron-forward"} size={20} color={theme.colors.muted} />
               </Pressable>
             ))}
@@ -525,4 +584,38 @@ const styles = StyleSheet.create({
   locHintText: { flex: 1, color: theme.colors.warning, fontSize: 12, fontWeight: "600" },
   empty: { alignItems: "center", gap: theme.spacing.sm, paddingVertical: theme.spacing.xxl },
   emptyText: { color: theme.colors.muted, fontSize: 14 },
+  activeFiltersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: theme.spacing.sm,
+  },
+  activePricePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: theme.radius.pill,
+    backgroundColor: "rgba(212, 175, 55, 0.15)",
+    borderWidth: 1,
+    borderColor: theme.colors.brand,
+  },
+  activePriceText: {
+    color: theme.colors.brand,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  providerRowTablet: {
+    width: "48.5%",
+  },
+  providerRowSmall: {
+    padding: 10,
+    gap: 8,
+  },
+  providerAvatarSmall: {
+    width: 44,
+    height: 44,
+  },
 });

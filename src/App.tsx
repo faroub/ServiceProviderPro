@@ -5,7 +5,8 @@ import {
   CheckCircle2, AlertCircle, Clock, Calendar, MessageSquare,
   Shield, DollarSign, Search, Filter, X, ChevronRight,
   User, Settings, ArrowLeft, Send, Phone, ThumbsUp, Plus,
-  ExternalLink, HelpCircle, FileText, Globe, Check, AlertTriangle
+  ExternalLink, HelpCircle, FileText, Globe, Check, AlertTriangle,
+  Heart, Trash2
 } from 'lucide-react';
 
 import {
@@ -16,21 +17,22 @@ import {
 import { TRANSLATIONS, Language } from './i18n';
 import { LazyPortfolioImage } from './components/LazyPortfolioImage';
 import { PortfolioLightbox } from './components/PortfolioLightbox';
+import { ClientPortal } from './components/ClientPortal';
 
 export default function App() {
-  // Localization
+  // Localization (forced LTR layout)
   const [lang, setLang] = useState<Language>('en');
   const t = TRANSLATIONS[lang];
-  const isRtl = lang === 'ar';
+  const isRtl = false;
 
-  // Set html dir attribute on language change
+  // Set html dir attribute on language change (always LTR)
   useEffect(() => {
-    document.documentElement.dir = isRtl ? 'rtl' : 'ltr';
+    document.documentElement.dir = 'ltr';
     document.documentElement.lang = lang;
-  }, [lang, isRtl]);
+  }, [lang]);
 
-  // Active View / Page: 'marketplace' | 'bookings' | 'messages' | 'providerDash' | 'adminHub' | 'howItWorks' | 'forProviders' | 'contact'
-  const [activeTab, setActiveTab] = useState<'marketplace' | 'bookings' | 'messages' | 'providerDash' | 'adminHub' | 'howItWorks' | 'forProviders' | 'contact'>('marketplace');
+  // Active View / Page: 'marketplace' | 'client' | 'bookings' | 'messages' | 'providerDash' | 'adminHub' | 'howItWorks' | 'forProviders' | 'contact'
+  const [activeTab, setActiveTab] = useState<'marketplace' | 'client' | 'bookings' | 'messages' | 'providerDash' | 'adminHub' | 'howItWorks' | 'forProviders' | 'contact'>('marketplace');
 
   // User State & Roles: 'client' | 'provider' | 'admin'
   const [currentUserRole, setCurrentUserRole] = useState<'client' | 'provider' | 'admin'>('client');
@@ -84,11 +86,52 @@ export default function App() {
     localStorage.setItem('kp_reports', JSON.stringify(reports));
   }, [reports]);
 
+  // Saved / Favorite Providers State
+  const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('kp_favorite_providers');
+      return saved ? JSON.parse(saved) : ['p1', 'p3'];
+    } catch {
+      return ['p1', 'p3'];
+    }
+  });
+
+  const [clientSubTab, setClientSubTab] = useState<'saved' | 'bookings'>('saved');
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('kp_favorite_providers', JSON.stringify(favoriteIds));
+    } catch {
+      // ignore
+    }
+  }, [favoriteIds]);
+
+  const toggleFavorite = (providerId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    setFavoriteIds(prev => {
+      if (prev.includes(providerId)) {
+        return prev.filter(id => id !== providerId);
+      } else {
+        return [...prev, providerId];
+      }
+    });
+  };
+
+  const savedProviders = useMemo(() => {
+    return providers.filter(p => favoriteIds.includes(p.id));
+  }, [providers, favoriteIds]);
+
   // Marketplace Filters
+  const MAX_RATE_LIMIT = 5000;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedWilaya, setSelectedWilaya] = useState<string>('');
   const [verifiedOnly, setVerifiedOnly] = useState(false);
+  const [maxRate, setMaxRate] = useState<number>(MAX_RATE_LIMIT);
   const [sortBy, setSortBy] = useState<'rating' | 'price_asc' | 'price_desc'>('rating');
 
   // Modals & Selections
@@ -151,6 +194,8 @@ export default function App() {
       if (selectedCategory && p.category !== selectedCategory) return false;
       if (selectedWilaya && p.wilayaCode !== selectedWilaya && !p.crossWilaya) return false;
       if (verifiedOnly && !p.verified) return false;
+      if (favoritesOnly && !favoriteIds.includes(p.id)) return false;
+      if (maxRate < MAX_RATE_LIMIT && (p.hourlyRate == null || p.hourlyRate > maxRate)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesName = p.fullName.toLowerCase().includes(q);
@@ -174,7 +219,7 @@ export default function App() {
       if (sortBy === 'price_desc') return b.hourlyRate - a.hourlyRate;
       return 0;
     });
-  }, [providers, selectedCategory, selectedWilaya, verifiedOnly, searchQuery, sortBy]);
+  }, [providers, selectedCategory, selectedWilaya, verifiedOnly, searchQuery, sortBy, favoritesOnly, favoriteIds, maxRate]);
 
   // Handle New Booking Submission
   const handleConfirmBooking = (e: React.FormEvent) => {
@@ -307,22 +352,22 @@ export default function App() {
 
       {/* Main Sticky Header */}
       <header className="sticky top-0 z-40 bg-[#0B1120]/90 backdrop-blur-md border-b border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2 overflow-hidden">
           
           {/* Brand Logo */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2.5 sm:gap-6 flex-shrink-0">
             <button
               onClick={() => setActiveTab('marketplace')}
-              className="flex items-center gap-2.5 group text-left"
+              className="flex items-center gap-2 group text-left"
             >
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-400 flex items-center justify-center text-slate-950 font-black text-lg shadow-md group-hover:scale-105 transition-transform">
-                k
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-400 flex items-center justify-center text-slate-950 font-black text-base sm:text-lg shadow-md group-hover:scale-105 transition-transform">
+                K
               </div>
               <div>
-                <span className="text-xl font-black tracking-tight text-white">
-                  khedma<span className="text-amber-400">Pro</span>
+                <span className="text-lg sm:text-xl font-black tracking-tight text-white">
+                  Khedma<span className="text-amber-400">Pro</span>
                 </span>
-                <span className="hidden sm:inline-block ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                <span className="hidden sm:inline-block ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
                   DZ
                 </span>
               </div>
@@ -339,6 +384,26 @@ export default function App() {
                 }`}
               >
                 {t.nav.browse}
+              </button>
+              <button
+                id="nav-client-tab-btn"
+                onClick={() => {
+                  setCurrentUserRole('client');
+                  setActiveTab('client');
+                  setClientSubTab('saved');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  activeTab === 'client'
+                    ? 'bg-slate-800 text-amber-400 font-semibold'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <span>{t.nav.clientSpace || 'Client'}</span>
+                {favoriteIds.length > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-bold flex items-center justify-center">
+                    {favoriteIds.length}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => setActiveTab('howItWorks')}
@@ -374,19 +439,46 @@ export default function App() {
           </div>
 
           {/* Right Action Bar */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             
+            {/* Favorites shortcut */}
+            <button
+              id="header-fav-shortcut"
+              onClick={() => {
+                setCurrentUserRole('client');
+                setActiveTab('client');
+                setClientSubTab('saved');
+              }}
+              className={`p-1.5 sm:p-2 rounded-lg relative transition-colors ${
+                activeTab === 'client' && clientSubTab === 'saved'
+                  ? 'bg-rose-500/20 text-rose-400'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+              title={t.clientTab?.tabSaved || "Saved Pros"}
+            >
+              <Heart className={`w-4 h-4 sm:w-5 sm:h-5 ${favoriteIds.length > 0 ? 'text-rose-400 fill-rose-500/30' : ''}`} />
+              {favoriteIds.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-rose-500 text-white font-bold text-[9px] sm:text-[10px] rounded-full flex items-center justify-center shadow-sm">
+                  {favoriteIds.length}
+                </span>
+              )}
+            </button>
+
             {/* Bookings shortcut */}
             <button
-              onClick={() => setActiveTab('bookings')}
-              className={`p-2 rounded-lg relative transition-colors ${
-                activeTab === 'bookings' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              onClick={() => {
+                setCurrentUserRole('client');
+                setActiveTab('client');
+                setClientSubTab('bookings');
+              }}
+              className={`p-1.5 sm:p-2 rounded-lg relative transition-colors ${
+                (activeTab === 'bookings' || (activeTab === 'client' && clientSubTab === 'bookings')) ? 'bg-amber-500/20 text-amber-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
               title={t.nav.bookings}
             >
-              <Calendar className="w-5 h-5" />
+              <Calendar className="w-4 h-4 sm:w-5 sm:h-5" />
               {bookings.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-slate-950 font-bold text-[10px] rounded-full flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-amber-500 text-slate-950 font-bold text-[9px] sm:text-[10px] rounded-full flex items-center justify-center">
                   {bookings.length}
                 </span>
               )}
@@ -395,13 +487,13 @@ export default function App() {
             {/* Chat shortcut */}
             <button
               onClick={() => setActiveTab('messages')}
-              className={`p-2 rounded-lg relative transition-colors ${
+              className={`p-1.5 sm:p-2 rounded-lg relative transition-colors ${
                 activeTab === 'messages' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
               }`}
               title={t.nav.messages}
             >
-              <MessageSquare className="w-5 h-5" />
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 text-white font-bold text-[10px] rounded-full flex items-center justify-center">
+              <MessageSquare className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 sm:w-4 sm:h-4 bg-emerald-500 text-white font-bold text-[9px] sm:text-[10px] rounded-full flex items-center justify-center">
                 1
               </span>
             </button>
@@ -411,13 +503,13 @@ export default function App() {
               <button
                 onClick={() => {
                   setCurrentUserRole('client');
-                  if (activeTab === 'providerDash' || activeTab === 'adminHub') setActiveTab('marketplace');
+                  setActiveTab('client');
                 }}
                 className={`px-2.5 py-1 rounded-md transition-colors ${
-                  currentUserRole === 'client' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
+                  currentUserRole === 'client' && (activeTab === 'client' || activeTab === 'marketplace') ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Client
+                {t.nav.clientSpace || 'Client'}
               </button>
               <button
                 onClick={() => {
@@ -444,12 +536,12 @@ export default function App() {
             </div>
 
             {/* Language Switcher */}
-            <div className="flex items-center bg-slate-800/80 border border-slate-700/80 rounded-lg px-2 py-1 text-xs">
-              <Globe className="w-3.5 h-3.5 mr-1.5 text-slate-400" />
+            <div className="flex items-center bg-slate-800/80 border border-slate-700/80 rounded-lg px-1.5 sm:px-2 py-1 text-xs">
+              <Globe className="w-3.5 h-3.5 mr-1 text-slate-400 flex-shrink-0" />
               <select
                 value={lang}
                 onChange={(e) => setLang(e.target.value as Language)}
-                className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium"
+                className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium text-xs"
               >
                 <option value="en" className="bg-slate-900 text-white">EN</option>
                 <option value="fr" className="bg-slate-900 text-white">FR</option>
@@ -460,55 +552,78 @@ export default function App() {
             {/* User Profile / Sign In */}
             <button
               onClick={() => setIsAuthOpen(true)}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-700 transition-colors"
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-700 transition-colors flex-shrink-0"
             >
               <User className="w-3.5 h-3.5 text-amber-400" />
               <span className="hidden sm:inline">{userName.split(' ')[0]}</span>
             </button>
           </div>
         </div>
-
-        {/* Mobile Navigation Bar */}
-        <div className="md:hidden flex items-center justify-around border-t border-slate-800/80 bg-slate-900/90 py-2 px-2 text-xs">
-          <button
-            onClick={() => setActiveTab('marketplace')}
-            className={`flex flex-col items-center gap-1 ${activeTab === 'marketplace' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-          >
-            <Search className="w-4 h-4" />
-            <span>{t.nav.browse}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('bookings')}
-            className={`flex flex-col items-center gap-1 ${activeTab === 'bookings' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-          >
-            <Calendar className="w-4 h-4" />
-            <span>{t.nav.bookings}</span>
-          </button>
-          <button
-            onClick={() => {
-              setCurrentUserRole('provider');
-              setActiveTab('providerDash');
-            }}
-            className={`flex flex-col items-center gap-1 ${activeTab === 'providerDash' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-          >
-            <Briefcase className="w-4 h-4" />
-            <span>{t.nav.providerDashboard}</span>
-          </button>
-          <button
-            onClick={() => {
-              setCurrentUserRole('admin');
-              setActiveTab('adminHub');
-            }}
-            className={`flex flex-col items-center gap-1 ${activeTab === 'adminHub' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-          >
-            <Shield className="w-4 h-4" />
-            <span>{t.nav.adminHub}</span>
-          </button>
-        </div>
       </header>
 
+      {/* Fixed Mobile Bottom Navigation Bar */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0B1120]/95 backdrop-blur-md border-t border-slate-800 py-2 px-1 text-[10px] font-medium flex items-center justify-around shadow-2xl">
+        <button
+          onClick={() => setActiveTab('marketplace')}
+          className={`flex flex-col items-center gap-0.5 ${activeTab === 'marketplace' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <Search className="w-4 h-4" />
+          <span>{t.nav.browse}</span>
+        </button>
+        <button
+          id="mobile-nav-client"
+          onClick={() => {
+            setCurrentUserRole('client');
+            setActiveTab('client');
+            setClientSubTab('saved');
+          }}
+          className={`flex flex-col items-center gap-0.5 relative ${activeTab === 'client' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <div className="relative">
+            <Heart className={`w-4 h-4 ${favoriteIds.length > 0 ? 'text-rose-400 fill-rose-500/40' : ''}`} />
+            {favoriteIds.length > 0 && (
+              <span className="absolute -top-1 -right-2 w-3.5 h-3.5 bg-rose-500 text-white font-bold text-[8px] rounded-full flex items-center justify-center">
+                {favoriteIds.length}
+              </span>
+            )}
+          </div>
+          <span>{t.nav.clientSpace || 'Client'}</span>
+        </button>
+        <button
+          onClick={() => {
+            setCurrentUserRole('client');
+            setActiveTab('client');
+            setClientSubTab('bookings');
+          }}
+          className={`flex flex-col items-center gap-0.5 ${activeTab === 'bookings' || (activeTab === 'client' && clientSubTab === 'bookings') ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>{t.nav.bookings}</span>
+        </button>
+        <button
+          onClick={() => {
+            setCurrentUserRole('provider');
+            setActiveTab('providerDash');
+          }}
+          className={`flex flex-col items-center gap-0.5 ${activeTab === 'providerDash' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <Briefcase className="w-4 h-4" />
+          <span>{t.nav.providerDashboard}</span>
+        </button>
+        <button
+          onClick={() => {
+            setCurrentUserRole('admin');
+            setActiveTab('adminHub');
+          }}
+          className={`flex flex-col items-center gap-0.5 ${activeTab === 'adminHub' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <Shield className="w-4 h-4" />
+          <span>{t.nav.adminHub}</span>
+        </button>
+      </nav>
+
       {/* MAIN VIEW ROUTING */}
-      <main className="flex-1">
+      <main className="flex-1 pb-20 md:pb-0">
 
         {/* VIEW 1: MARKETPLACE BROWSER */}
         {activeTab === 'marketplace' && (
@@ -642,14 +757,103 @@ export default function App() {
 
             {/* Filter Bar */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div className="text-xs sm:text-sm font-medium text-slate-400">
-                <span className="font-bold text-white">{filteredProviders.length}</span> {t.filters.foundCount}
-                {selectedWilaya && (
-                  <span className="ml-1 text-amber-400 font-semibold">({getWilayaName(selectedWilaya)})</span>
+              <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm font-medium text-slate-400">
+                <div>
+                  <span className="font-bold text-white">{filteredProviders.length}</span> {t.filters.foundCount}
+                  {selectedWilaya && (
+                    <span className="ml-1 text-amber-400 font-semibold">({getWilayaName(selectedWilaya)})</span>
+                  )}
+                </div>
+
+                {/* Active price pill */}
+                {maxRate < MAX_RATE_LIMIT && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 text-xs font-semibold">
+                    <DollarSign className="w-3 h-3 text-amber-400" />
+                    <span>≤ {maxRate.toLocaleString()} DZD/hr</span>
+                    <button
+                      type="button"
+                      onClick={() => setMaxRate(MAX_RATE_LIMIT)}
+                      className="hover:text-amber-200 ml-0.5"
+                      title={t.filters.reset}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Price Range Slider */}
+                <div
+                  id="filter-price-range"
+                  className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 text-xs"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-400 font-semibold whitespace-nowrap hidden sm:inline">
+                      {t.filters.hourlyRate || 'Rate'}:
+                    </span>
+                    <span className="font-bold text-amber-400 min-w-[70px]">
+                      {maxRate >= MAX_RATE_LIMIT ? (t.filters.allRates || 'Any rate') : `≤ ${maxRate.toLocaleString()} DZD`}
+                    </span>
+                  </div>
+                  <input
+                    id="price-range-slider"
+                    type="range"
+                    min="500"
+                    max={MAX_RATE_LIMIT}
+                    step="100"
+                    value={maxRate}
+                    onChange={(e) => setMaxRate(Number(e.target.value))}
+                    className="w-20 sm:w-28 accent-amber-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
+                    title={t.filters.rateSliderHint || 'Slide to filter by maximum hourly rate'}
+                  />
+                  {maxRate < MAX_RATE_LIMIT && (
+                    <button
+                      type="button"
+                      onClick={() => setMaxRate(MAX_RATE_LIMIT)}
+                      className="text-slate-500 hover:text-slate-300 p-0.5 rounded"
+                      title={t.filters.reset}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick rate preset chips */}
+                <div className="hidden lg:flex items-center gap-1 text-[11px]">
+                  {[800, 1200, 2000].map(val => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setMaxRate(maxRate === val ? MAX_RATE_LIMIT : val)}
+                      className={`px-2 py-1 rounded-md border text-[11px] font-medium transition-colors ${
+                        maxRate === val
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      ≤ {val.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Saved Only Filter Toggle */}
+                <button
+                  id="filter-favorites-btn"
+                  type="button"
+                  onClick={() => setFavoritesOnly(!favoritesOnly)}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                    favoritesOnly
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white bg-slate-900 border-slate-800'
+                  }`}
+                  title="Filter by saved professionals"
+                >
+                  <Heart className={`w-3.5 h-3.5 ${favoritesOnly ? 'fill-rose-500 text-rose-500' : ''}`} />
+                  <span>{t.clientTab?.tabSaved || 'Saved'} ({favoriteIds.length})</span>
+                </button>
+
                 {/* Verified Toggle */}
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-300 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 hover:border-slate-700">
                   <input
@@ -691,6 +895,8 @@ export default function App() {
                       setSelectedCategory(null);
                       setSelectedWilaya('');
                       setVerifiedOnly(false);
+                      setFavoritesOnly(false);
+                      setMaxRate(MAX_RATE_LIMIT);
                       setSearchQuery('');
                     }}
                     className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs hover:bg-amber-400"
@@ -730,6 +936,19 @@ export default function App() {
                                 <h4 className="font-bold text-white text-base truncate group-hover:text-amber-400 transition-colors">
                                   {p.fullName}
                                 </h4>
+                                <button
+                                  id={`card-fav-${p.id}`}
+                                  type="button"
+                                  onClick={(e) => toggleFavorite(p.id, e)}
+                                  title={favoriteIds.includes(p.id) ? (t.card.removeFromFavorites || 'Remove from favorites') : (t.card.saveToFavorites || 'Save to favorites')}
+                                  className={`p-1.5 rounded-xl transition-all flex-shrink-0 ${
+                                    favoriteIds.includes(p.id)
+                                      ? 'text-rose-500 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 shadow-sm'
+                                      : 'text-slate-500 hover:text-rose-400 hover:bg-slate-800/80'
+                                  }`}
+                                >
+                                  <Heart className={`w-4 h-4 transition-transform active:scale-75 ${favoriteIds.includes(p.id) ? 'fill-rose-500 text-rose-500' : ''}`} />
+                                </button>
                               </div>
                               <div className="text-xs font-semibold text-amber-400/90 flex items-center gap-1.5 mt-0.5">
                                 {catObj && renderCategoryIcon(catObj.icon, "w-3.5 h-3.5")}
@@ -800,110 +1019,29 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: CLIENT BOOKINGS TAB */}
-        {activeTab === 'bookings' && (
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl sm:text-3xl font-black text-white">{t.bookingsTab.title}</h2>
-                <p className="text-slate-400 text-sm">{t.bookingsTab.subtitle}</p>
-              </div>
-              <button
-                onClick={() => setActiveTab('marketplace')}
-                className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs hover:bg-amber-400"
-              >
-                + Find Another Pro
-              </button>
-            </div>
-
-            {bookings.length === 0 ? (
-              <div className="text-center py-16 bg-slate-900/40 rounded-2xl border border-slate-800 p-8">
-                <Calendar className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <p className="text-slate-400 text-sm mb-4">{t.bookingsTab.empty}</p>
-                <button
-                  onClick={() => setActiveTab('marketplace')}
-                  className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs"
-                >
-                  {t.hero.searchBtn}
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {bookings.map(b => {
-                  const statusColors = {
-                    pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-                    confirmed: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-                    completed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-                    cancelled: 'bg-red-500/15 text-red-400 border-red-500/30'
-                  }[b.status];
-
-                  return (
-                    <div key={b.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-base font-bold text-white">{b.providerName}</h4>
-                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${statusColors}`}>
-                            {b.status.toUpperCase()}
-                          </span>
-                        </div>
-                        <div className="text-xs text-amber-400 font-semibold">{b.providerCategory}</div>
-                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 pt-1">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                            {b.date} ({b.timeSlot})
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                            {b.address}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-400 italic pt-1">"{b.description}"</p>
-                      </div>
-
-                      <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-800">
-                        <div className="text-right">
-                          <div className="text-xs text-slate-400">Est. Total</div>
-                          <div className="text-base font-black text-amber-400">{b.priceEstimate} {t.currency}</div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {b.status === 'completed' && (
-                            <button
-                              onClick={() => setReviewingBooking(b)}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-                            >
-                              <Star className="w-3.5 h-3.5" />
-                              {t.bookingsTab.leaveReview}
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setActiveChatThread(b.providerId);
-                              setActiveTab('messages');
-                            }}
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
-                            {t.bookingsTab.chatWithPro}
-                          </button>
-                          {b.status === 'pending' && (
-                            <button
-                              onClick={() => {
-                                setBookings(prev => prev.map(item => item.id === b.id ? { ...item, status: 'cancelled' } : item));
-                              }}
-                              className="text-red-400 hover:text-red-300 text-xs font-semibold px-2 py-1"
-                            >
-                              {t.bookingsTab.cancelBooking}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {/* VIEW 2: CLIENT PORTAL (SAVED PROFESSIONALS & BOOKINGS) */}
+        {(activeTab === 'client' || activeTab === 'bookings') && (
+          <ClientPortal
+            initialSubTab={activeTab === 'bookings' ? 'bookings' : clientSubTab}
+            savedProviders={savedProviders}
+            favoriteIds={favoriteIds}
+            onToggleFavorite={toggleFavorite}
+            bookings={bookings}
+            onCancelBooking={(id) => setBookings(prev => prev.map(item => item.id === id ? { ...item, status: 'cancelled' } : item))}
+            onReviewBooking={(b) => setReviewingBooking(b)}
+            onChatWithPro={(providerId) => {
+              setActiveChatThread(providerId);
+              setActiveTab('messages');
+            }}
+            onViewProfile={(p) => setSelectedProvider(p)}
+            onBookProvider={(p) => setBookingProvider(p)}
+            onBrowseMarketplace={() => setActiveTab('marketplace')}
+            lang={lang}
+            t={t}
+            userName={userName}
+            getWilayaName={getWilayaName}
+            renderCategoryIcon={renderCategoryIcon}
+          />
         )}
 
         {/* VIEW 3: IN-APP CHAT VIEW */}
@@ -1430,12 +1568,27 @@ export default function App() {
       {selectedProvider && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 space-y-6 shadow-2xl relative my-8">
-            <button
-              onClick={() => setSelectedProvider(null)}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="absolute top-4 right-4 flex items-center gap-1.5">
+              <button
+                id="modal-fav-toggle-btn"
+                type="button"
+                onClick={() => toggleFavorite(selectedProvider.id)}
+                title={favoriteIds.includes(selectedProvider.id) ? (t.card.removeFromFavorites || 'Remove from favorites') : (t.card.saveToFavorites || 'Save to favorites')}
+                className={`p-2 rounded-xl transition-colors border ${
+                  favoriteIds.includes(selectedProvider.id)
+                    ? 'text-rose-500 bg-rose-500/15 border-rose-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-rose-400 bg-slate-800/80 border-slate-700'
+                }`}
+              >
+                <Heart className={`w-5 h-5 ${favoriteIds.includes(selectedProvider.id) ? 'fill-rose-500' : ''}`} />
+              </button>
+              <button
+                onClick={() => setSelectedProvider(null)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             {/* Provider header info */}
             <div className="flex items-start gap-4">
@@ -1924,12 +2077,12 @@ export default function App() {
       {/* FOOTER */}
       <footer className="bg-slate-950 border-t border-slate-800/80 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="w-6 h-6 rounded-lg bg-amber-500 flex items-center justify-center text-slate-950 font-black text-xs">
-              k
+              K
             </div>
-            <span className="font-bold text-white">khedmaPro</span>
-            <span>— {t.tagline}</span>
+            <span className="font-bold text-white">Khedma<span className="text-amber-400">Pro</span></span>
+            <span className="text-slate-500">— {t.tagline}</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-6">
@@ -1947,8 +2100,8 @@ export default function App() {
             </button>
           </div>
 
-          <div className="text-slate-500">
-            © 2026 khedmaPro DZ. Made for Algeria 🇩🇿
+          <div className="text-slate-400 font-semibold tracking-wide bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800/80">
+            © mzilab. Made for algeria
           </div>
         </div>
       </footer>

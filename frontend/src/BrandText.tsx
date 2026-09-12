@@ -17,7 +17,7 @@ export function BrandText({ style, proColor, testID }: Props) {
   const accent = proColor || theme.colors.brand;
   return (
     <Text style={style} testID={testID}>
-      khedma
+      Khedma
       <Text style={{ color: accent }}>Pro</Text>
     </Text>
   );

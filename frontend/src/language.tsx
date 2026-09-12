@@ -1717,15 +1717,10 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       const saved = await readLang();
       if (saved) setLangState(saved);
       // Apply RTL layout ONLY when Arabic is selected. On native this requires
-      // an app reload to take full effect for flex direction; text-level RTL
-      // (writingDirection) is applied per-component below.
-      const shouldRTL = (saved || "en") === "ar";
+      // Enforce LTR layout across all languages
       try {
-        // Always write the desired state so an old "forceRTL(true)" from a
-        // previous session is explicitly cleared when the user is no longer
-        // on Arabic.
-        I18nManager.allowRTL(shouldRTL);
-        I18nManager.forceRTL(shouldRTL);
+        I18nManager.allowRTL(false);
+        I18nManager.forceRTL(false);
       } catch {}
     })();
   }, []);
@@ -1733,13 +1728,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const setLang = useCallback((l: Lang) => {
     setLangState(l);
     writeLang(l);
-    // Toggle RTL. Restart needed on native for full effect (user is prompted in UI).
     try {
-      const rtl = l === "ar";
-      // Always write both flags so switching Arabic → English/French truly
-      // clears RTL, not just when the flag currently differs.
-      I18nManager.allowRTL(rtl);
-      I18nManager.forceRTL(rtl);
+      I18nManager.allowRTL(false);
+      I18nManager.forceRTL(false);
     } catch {}
   }, []);
 
@@ -1758,7 +1749,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
   const value: LangCtx = {
     lang,
-    isRTL: lang === "ar",
+    isRTL: false,
     setLang,
     t,
   };
